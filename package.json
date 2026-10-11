@@ -1,0 +1,23 @@
+{
+  "name": "asawin-rattikan",
+  "version": "1.0.0",
+  "description": "ระบบจองโรงแรม + จับคู่บัดดี้ด้วย AI Agent",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "reset-db": "rm -f data/app.db data/app.db-wal data/app.db-shm && node src/db.js --seed-only",
+    "icons": "node scripts/build-icons.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "lucide-static": "^1.55.0"
+  }
+}
