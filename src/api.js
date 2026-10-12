@@ -4,7 +4,7 @@ import { verifyPassword, hashPassword } from './password.js';
 import { createSession, destroySession, publicUser } from './auth.js';
 import * as gateway from './services/paymentGateway.js';
 import { notify } from './services/notificationService.js';
-import { suggestBuddies } from './services/buddyAgent.js';
+import { suggestBuddies, browseBuddies } from './services/buddyAgent.js';
 
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -254,6 +254,17 @@ route('POST', '/api/bookings/:id/qr', ({ params, user }) => {
   return { paymentId: Number(p.lastInsertRowid), ...qr };
 });
 
+// ชำระผ่าน TrueMoney Wallet
+route('POST', '/api/bookings/:id/truemoney', async ({ params, body, user }) => {
+  const b = loadBooking(params.id, user);
+  if (b.status !== 'pending' || b.amount_due <= 0) fail(400, 'การจองนี้ไม่มียอดที่ต้องชำระ');
+  const result = await gateway.chargeTrueMoney({ amount: b.amount_due, phone: body.phone });
+  const p = db.prepare(`INSERT INTO payments (booking_id, method, amount, status, transaction_ref, message) VALUES (?, 'truemoney', ?, ?, ?, ?)`)
+    .run(b.id, b.amount_due, result.status, result.transactionRef || null, result.message);
+  if (result.status !== 'success') return { status: 'failed', message: result.message, booking: bookingDetail(b.id, user) };
+  return { status: 'success', message: result.message, booking: confirmPayment(b, { id: p.lastInsertRowid, amount: b.amount_due }, user) };
+});
+
 // ตรวจสอบผลการชำระผ่าน QR
 route('POST', '/api/payments/:id/qr-confirm', async ({ params, user }) => {
   const p = db.prepare('SELECT * FROM payments WHERE id = ?').get(params.id);
@@ -327,7 +338,8 @@ route('POST', '/api/bookings/:id/cancel', async ({ params, user }) => {
   return { policy, booking: bookingDetail(b.id, user) };
 });
 
-route('POST', '/api/bookings/:id/checkin', ({ params, user }) => {
+// เช็คอิน/เช็คเอาท์ทำได้เฉพาะผู้ดูแลระบบ (พนักงานเคาน์เตอร์)
+route('POST', '/api/bookings/:id/checkin', { admin: true }, ({ params, user }) => {
   const b = loadBooking(params.id, user);
   if (b.status !== 'confirmed') fail(400, 'เช็คอินได้เฉพาะการจองที่ยืนยันและชำระเงินครบแล้ว');
   db.prepare("UPDATE bookings SET status = 'checked_in', checked_in_at = datetime('now') WHERE id = ?").run(b.id);
@@ -336,7 +348,7 @@ route('POST', '/api/bookings/:id/checkin', ({ params, user }) => {
   return bookingDetail(b.id, user);
 });
 
-route('POST', '/api/bookings/:id/checkout', ({ params, user }) => {
+route('POST', '/api/bookings/:id/checkout', { admin: true }, ({ params, user }) => {
   const b = loadBooking(params.id, user);
   if (b.status !== 'checked_in') fail(400, 'ต้องเช็คอินก่อนจึงจะเช็คเอาท์ได้');
   db.prepare("UPDATE bookings SET status = 'checked_out', checked_out_at = datetime('now') WHERE id = ?").run(b.id);
@@ -386,6 +398,15 @@ route('POST', '/api/buddy/suggest', async ({ user }) => {
   return suggestBuddies(user.id);
 });
 
+// ค้นหาบัดดี้ด้วยตัวเอง
+route('GET', '/api/buddy/browse', ({ query, user }) => {
+  if (!user.buddy_enabled) fail(400, 'กรุณาเปิดใช้งานและกรอกโปรไฟล์บัดดี้ก่อน');
+  return browseBuddies(user.id, query);
+});
+route('GET', '/api/buddy/cities', () =>
+  db.prepare(`SELECT DISTINCT h.city FROM bookings b JOIN rooms r ON r.id = b.room_id JOIN hotels h ON h.id = r.hotel_id
+    JOIN users u ON u.id = b.user_id WHERE u.buddy_enabled = 1 AND b.status IN ('pending','confirmed','checked_in') ORDER BY h.city`).all().map((r) => r.city));
+
 const matchView = (m, me) => {
   const otherId = m.requester_id === me ? m.target_id : m.requester_id;
   const o = db.prepare('SELECT id, name, age, gender, bio, interests, travel_style FROM users WHERE id = ?').get(otherId);
@@ -411,7 +432,7 @@ route('POST', '/api/buddy/request', ({ body, user }) => {
   if (exists) fail(409, 'มีคำขอจับคู่กับผู้ใช้นี้อยู่แล้ว');
   db.prepare('INSERT INTO buddy_matches (requester_id, target_id, score, reason) VALUES (?,?,?,?)')
     .run(user.id, target.id, int(body.score, null), String(body.reason || '').slice(0, 300));
-  notify(target.id, { title: 'มีคำขอจับคู่บัดดี้ใหม่', message: `${user.name} อยากเป็นบัดดี้ท่องเที่ยวกับคุณ`, link: '#/buddy' });
+  notify(target.id, { title: 'มีคำขอจับคู่บัดดี้ใหม่', message: `${user.name} อยากเป็นบัดดี้ท่องเที่ยวกับคุณ`, link: '#/buddy?tab=requests' });
   return { ok: true };
 });
 

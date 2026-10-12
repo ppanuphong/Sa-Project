@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   booking_id INTEGER NOT NULL REFERENCES bookings(id),
   kind TEXT NOT NULL DEFAULT 'payment',            -- payment | refund
-  method TEXT NOT NULL,                            -- card | qr | refund
+  method TEXT NOT NULL,                            -- card | qr | truemoney | refund
   amount REAL NOT NULL,
   status TEXT NOT NULL,                            -- pending | success | failed
   transaction_ref TEXT,
@@ -307,7 +307,39 @@ function seed() {
     .run(uid.demo, 'มีคำขอจับคู่บัดดี้ใหม่', 'มะลิ ส่งคำขอเป็นบัดดี้เที่ยวเชียงใหม่กับคุณ', '#/buddy');
 }
 
+// ---------- บัดดี้ตัวอย่างเพิ่มเติม ----------
+// แยกจาก seed() เพื่อให้เพิ่มเข้าไปในฐานข้อมูลเดิมได้ด้วย (เพิ่มเฉพาะคนที่ยังไม่มี)
+function seedExtraBuddies() {
+  if (!db.prepare('SELECT COUNT(*) AS n FROM hotels').get().n) return;
+  const extra = [
+    // username, password, ชื่อ, เพศ, อายุ, แนะนำตัว, ความสนใจ, สไตล์, [โรงแรม, ห้อง, เริ่มอีกกี่วัน, จำนวนคืน]
+    ['fah', 'fah12345', 'ฟ้า', 'หญิง', 26, 'สายคาเฟ่ตัวจริง ชอบถ่ายรูปฟิล์มและนั่งชิลดูวิวภูเขา', ['คาเฟ่', 'ถ่ายรูป', 'ธรรมชาติ'], 'ชิล ๆ', [3, 'Standard', 5, 3]],
+    ['bank', 'bank1234', 'แบงค์', 'ชาย', 27, 'ชอบเดินป่าขึ้นดอย ตั้งแคมป์ และถ่ายรูปวิวพระอาทิตย์ขึ้น', ['เดินป่า', 'ปีนเขา', 'ถ่ายรูป'], 'ลุย ๆ', [4, 'Deluxe', 6, 3]],
+    ['mint', 'mint1234', 'มิ้นท์', 'หญิง', 23, 'หลงรักทะเล ดำน้ำตื้นได้ทั้งวัน กลางคืนชอบไปบีชบาร์', ['ทะเล', 'ดำน้ำ', 'ปาร์ตี้'], 'ผจญภัย', [5, 'Standard', 10, 4]],
+    ['pete', 'pete1234', 'พีท', 'ชาย', 30, 'เที่ยวแบบประหยัด ตระเวนกินสตรีทฟู้ดและตลาดกลางคืน', ['อาหาร', 'ตลาดกลางคืน', 'ช้อปปิ้ง'], 'ประหยัด', [2, 'Standard', 3, 2]],
+    ['jane', 'jane1234', 'เจน', 'LGBTQ+', 28, 'ชอบรีสอร์ทวิวทะเล สปา และคาเฟ่สวย ๆ พักผ่อนแบบไม่เร่งรีบ', ['สปา', 'คาเฟ่', 'ทะเล'], 'หรูหรา', [7, 'Deluxe', 15, 3]],
+  ];
+  const insUser = db.prepare(`INSERT INTO users
+    (username, password_hash, name, email, phone, role, gender, age, bio, interests, travel_style, buddy_enabled)
+    VALUES (?,?,?,?,?, 'customer', ?,?,?,?,?, 1)`);
+  const insBooking = db.prepare(`INSERT INTO bookings
+    (code, user_id, room_id, check_in, check_out, guests, rooms_count, guest_name, guest_phone, guest_email, total_price, paid_amount, status)
+    VALUES (?,?,?,?,?, 1, 1, ?,?,?,?,?, 'confirmed')`);
+  const insPay = db.prepare(`INSERT INTO payments (booking_id, method, amount, status, transaction_ref, message)
+    VALUES (?, 'card', ?, 'success', ?, 'ข้อมูลตัวอย่าง')`);
+  extra.forEach(([username, pw, name, gender, age, bio, interests, style, [hotelId, type, inOff, nights]], i) => {
+    if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) return;
+    const email = `${username}@staybuddy.test`, phone = `08${6 + i}${String(6 + i).repeat(7)}`;
+    const uid = Number(insUser.run(username, hashPassword(pw), name, email, phone, gender, age, bio, JSON.stringify(interests), style).lastInsertRowid);
+    const room = db.prepare('SELECT * FROM rooms WHERE hotel_id = ? AND type = ?').get(hotelId, type);
+    const ci = addDays(today(), inOff), total = room.price * nights;
+    const b = insBooking.run(bookingCode(), uid, room.id, ci, addDays(ci, nights), name, phone, email, total, total);
+    insPay.run(b.lastInsertRowid, total, 'TXN-SEED-' + b.lastInsertRowid);
+  });
+}
+
 seed();
+seedExtraBuddies();
 applyHotelMedia();
 
 if (process.argv.includes('--seed-only')) {

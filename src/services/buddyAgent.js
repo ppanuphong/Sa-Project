@@ -102,11 +102,15 @@ async function rankWithClaude(me, candidates) {
 }
 
 /** หาบัดดี้ที่เหมาะสมให้ผู้ใช้ */
-export async function suggestBuddies(userId, limit = 6) {
-  const meRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-  const me = profileOf(meRow);
+const toCard = (c, score, reason) => ({
+  user: { id: c.id, name: c.name, age: c.age, gender: c.gender, bio: c.bio, interests: c.interests, travel_style: c.travel_style },
+  trips: c.trips.map(({ city, hotel, check_in, check_out }) => ({ city, hotel, check_in, check_out })),
+  score,
+  reason,
+});
 
-  const others = db.prepare(`
+// ผู้ใช้ที่ค้นหา/จับคู่ได้ (เปิดใช้งาน, ยังไม่มีคำขอค้าง/เป็นบัดดี้กัน, ไม่เคยถูกเรารายงาน)
+const candidates = (userId) => db.prepare(`
     SELECT * FROM users u
     WHERE u.id != ? AND u.buddy_enabled = 1 AND u.role = 'customer'
       AND NOT EXISTS (SELECT 1 FROM buddy_matches m
@@ -114,6 +118,38 @@ export async function suggestBuddies(userId, limit = 6) {
           AND m.status IN ('pending','accepted'))
       AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.reporter_id = ? AND r.reported_id = u.id)
   `).all(userId, userId, userId, userId);
+
+/** ค้นหาบัดดี้ด้วยตัวเอง (ไม่ใช้ AI) — กรองตามคำค้น เมือง ช่วงวันที่ ความสนใจ สไตล์ เพศ และช่วงอายุ */
+export function browseBuddies(userId, f = {}) {
+  const me = profileOf(db.prepare('SELECT * FROM users WHERE id = ?').get(userId));
+  const q = String(f.q || '').trim().toLowerCase();
+  const interests = String(f.interests || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const ageMin = Number(f.ageMin) || 0, ageMax = Number(f.ageMax) || 999;
+  const results = candidates(userId).map(profileOf).filter((p) => {
+    if (q && !`${p.name} ${p.bio}`.toLowerCase().includes(q)) return false;
+    if (f.gender && p.gender !== f.gender) return false;
+    if (f.style && p.travel_style !== f.style) return false;
+    if ((f.ageMin || f.ageMax) && (!p.age || p.age < ageMin || p.age > ageMax)) return false;
+    if (interests.length && !interests.some((i) => p.interests.includes(i))) return false;
+    if (f.city || f.from || f.to) {
+      const hit = p.trips.some((t) => (!f.city || t.city === f.city)
+        && (!f.from || t.check_out > f.from) && (!f.to || t.check_in < f.to));
+      if (!hit) return false;
+    }
+    return true;
+  }).map((p) => { const l = localScore(me, p); return toCard(p, l.score, l.reason); });
+  const sort = f.sort || 'score';
+  results.sort(sort === 'name' ? (a, b) => a.user.name.localeCompare(b.user.name, 'th')
+    : sort === 'trip' ? (a, b) => (a.trips[0]?.check_in || '9').localeCompare(b.trips[0]?.check_in || '9')
+    : (a, b) => b.score - a.score);
+  return { me: { interests: me.interests, trips: me.trips }, total: results.length, results };
+}
+
+export async function suggestBuddies(userId, limit = 6) {
+  const meRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  const me = profileOf(meRow);
+
+  const others = candidates(userId);
 
   let ranked = others
     .map((u) => { const p = profileOf(u); return { ...p, local: localScore(me, p) }; })
@@ -136,14 +172,6 @@ export async function suggestBuddies(userId, limit = 6) {
   return {
     engine,
     me: { interests: me.interests, trips: me.trips },
-    suggestions: results.map((r) => {
-      const c = byId.get(r.user_id);
-      return {
-        user: { id: c.id, name: c.name, age: c.age, gender: c.gender, bio: c.bio, interests: c.interests, travel_style: c.travel_style },
-        trips: c.trips.map(({ city, hotel, check_in, check_out }) => ({ city, hotel, check_in, check_out })),
-        score: r.score,
-        reason: r.reason,
-      };
-    }),
+    suggestions: results.map((r) => toCard(byId.get(r.user_id), r.score, r.reason)),
   };
 }

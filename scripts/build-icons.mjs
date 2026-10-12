@@ -6,6 +6,8 @@ const NAMES = [
   'badge-percent', 'shield-check', 'bot', 'sparkles', 'map-pin', 'check', 'bed-double', 'credit-card', 'qr-code',
   'circle-check', 'circle-x', 'info', 'undo-2', 'concierge-bell', 'luggage', 'pencil', 'file-text', 'star',
   'message-circle', 'list-checks', 'plane', 'flag', 'lock', 'compass', 'image', 'log-out', 'arrow-right',
+  'wallet', 'arrow-up-down', 'chevron-down', 'smartphone', 'heart', 'arrow-down-narrow-wide', 'arrow-up-wide-narrow',
+  'printer', 'ticket',
 ];
 
 const icons = {};

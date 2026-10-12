@@ -29,6 +29,9 @@ const STATUS = {
   pending: 'รอชำระเงิน', confirmed: 'ยืนยันแล้ว', checked_in: 'เช็คอินแล้ว', checked_out: 'เช็คเอาท์แล้ว', cancelled: 'ยกเลิกแล้ว',
 };
 const statusPill = (s) => `<span class="pill ${s}">${STATUS[s] || s}</span>`;
+// ออกใบยืนยันการจองได้เมื่อชำระเงินแล้วเท่านั้น
+const hasVoucher = (b) => ['confirmed', 'checked_in', 'checked_out'].includes(b.status);
+const PAY_LABEL = { card: 'บัตรเครดิต/เดบิต', qr: 'QR พร้อมเพย์', truemoney: 'TrueMoney Wallet' };
 
 async function api(method, path, body) {
   const res = await fetch('/api' + path, {
@@ -114,7 +117,7 @@ function loginPage(q) {
         <div class="field"><label class="check"><input type="checkbox" name="remember"> จดจำการเข้าสู่ระบบ (30 วัน)</label></div>
         <button class="btn block">เข้าสู่ระบบ</button>
       </form>
-      <p class="small muted" style="margin-top:14px">ยังไม่มีบัญชี? <a href="#/register">สมัครสมาชิก</a></p>
+      <p class="small muted" style="margin-top:var(--space-4)">ยังไม่มีบัญชี? <a href="#/register">สมัครสมาชิก</a></p>
       <div class="demo-accounts">
         <b>บัญชีทดลอง</b><br>
         ลูกค้า: <code>demo</code> / <code>demo1234</code><br>
@@ -156,7 +159,7 @@ function registerPage() {
         <div class="field"><label>ยืนยันรหัสผ่าน *</label><input name="confirm" type="password" required autocomplete="new-password"></div>
         <button class="btn block">สมัครสมาชิก</button>
       </form>
-      <p class="small muted" style="margin-top:14px">มีบัญชีแล้ว? <a href="#/login">เข้าสู่ระบบ</a></p>
+      <p class="small muted" style="margin-top:var(--space-4)">มีบัญชีแล้ว? <a href="#/login">เข้าสู่ระบบ</a></p>
     </div></div>`;
   document.getElementById('f').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -183,10 +186,18 @@ const CITY_PHOTOS = {
 const ROOM_PHOTOS = {
   Standard: '1631049307264-da0ec9d70304', Deluxe: '1618773928121-c32242e63f39', 'Family Suite': '1578683010236-d716f9a3f461',
 };
-const SORTS = [['rating', 'คะแนนรีวิวสูงสุด'], ['price_asc', 'ราคาต่ำสุดก่อน'], ['price_desc', 'ราคาสูงสุดก่อน']];
+const SORTS = [['rating', 'star', 'รีวิวดีที่สุด'], ['price_asc', 'arrow-down-narrow-wide', 'ราคาถูก → แพง'], ['price_desc', 'arrow-up-wide-narrow', 'ราคาแพง → ถูก']];
 const PERK_CANCEL = 'ยกเลิกล่วงหน้า 7 วัน คืนเงินเต็มจำนวน';
 
 const guestLabel = (g, r) => `ผู้เข้าพัก ${g} คน, ${r} ห้อง`;
+// วันที่แบบอ่านง่าย เช่น "อ. 13 ต.ค. 69"
+const WEEKDAY = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
+const fmtDay = (iso) => { const d = new Date(iso + 'T00:00:00'); return `${WEEKDAY[d.getDay()]} ${d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}`; };
+const dateField = (name, label, value, min) => `
+  <label class="sbox-field date"><span class="ico">${ic('calendar-days', 20)}</span>
+    <span><small>${label}</small><b data-date-text="${name}">${fmtDay(value)}</b></span>
+    <input class="date-native" type="date" name="${name}" min="${min}" value="${value}" required aria-label="${label}">
+  </label>`;
 // โปรโมชั่นเดียวกับฝั่ง server: พัก 3 คืนขึ้นไป ลด 10%
 const promoPrice = (price, n) => (n >= 3 ? Math.round(price * 0.9) : price);
 
@@ -198,18 +209,18 @@ function searchForm(q, compact = false) {
     <form class="sbox ${compact ? 'compact' : ''}" id="search" autocomplete="off">
       <label class="sbox-dest"><span class="ico">${ic('search', 20)}</span><input name="q" list="cities" placeholder="จะไปที่ไหน? ค้นหาเมือง หรือชื่อที่พัก" value="${esc(q.get('q') || '')}"><datalist id="cities"></datalist></label>
       <div class="sbox-row">
-        <label class="sbox-field"><span class="ico">${ic('calendar-days', 20)}</span><span><small>เช็คอิน</small><input type="date" name="checkIn" min="${todayISO()}" value="${ci}" required></span></label>
-        <label class="sbox-field"><span class="ico">${ic('calendar-days', 20)}</span><span><small>เช็คเอาท์</small><input type="date" name="checkOut" min="${addDays(ci, 1)}" value="${co}" required></span></label>
+        ${dateField('checkIn', 'เช็คอิน', ci, todayISO())}
+        ${dateField('checkOut', `เช็คเอาท์ · <span data-nights>${nights(ci, co)}</span> คืน`, co, addDays(ci, 1))}
         <div class="sbox-field guests" tabindex="0"><span class="ico">${ic('users', 20)}</span><span><small>ผู้เข้าพักและห้อง</small><b class="guest-label">${guestLabel(g, r)}</b></span>
           <input type="hidden" name="guests" value="${g}"><input type="hidden" name="rooms" value="${r}">
           <div class="guest-pop" hidden>
             <div class="stepper"><span>ห้อง</span><div><button type="button" data-k="rooms" data-d="-1">−</button><output data-o="rooms">${r}</output><button type="button" data-k="rooms" data-d="1">+</button></div></div>
             <div class="stepper"><span>ผู้เข้าพัก</span><div><button type="button" data-k="guests" data-d="-1">−</button><output data-o="guests">${g}</output><button type="button" data-k="guests" data-d="1">+</button></div></div>
-            <button type="button" class="btn sm block" data-done style="margin-top:8px">เสร็จสิ้น</button>
+            <button type="button" class="btn sm block" data-done style="margin-top:var(--space-2)">เสร็จสิ้น</button>
           </div>
         </div>
       </div>
-      <button class="btn sbox-go">ค้นหา</button>
+      <button class="btn sbox-go">${ic('search', 18)} ค้นหา</button>
     </form>`;
 }
 
@@ -225,10 +236,18 @@ function bindSearchForm(extra = {}) {
   api('GET', '/cities').then((cities) => {
     f.querySelector('#cities').innerHTML = cities.map((c) => `<option value="${esc(c.city)}">`).join('');
   });
-  f.checkIn.addEventListener('change', () => {
+  const syncDates = () => {
+    if (!f.checkIn.value) f.checkIn.value = addDays(todayISO(), 1);
     f.checkOut.min = addDays(f.checkIn.value, 1);
-    if (f.checkOut.value <= f.checkIn.value) f.checkOut.value = addDays(f.checkIn.value, 1);
-  });
+    if (!f.checkOut.value || f.checkOut.value <= f.checkIn.value) f.checkOut.value = addDays(f.checkIn.value, 1);
+    f.querySelector('[data-date-text=checkIn]').textContent = fmtDay(f.checkIn.value);
+    f.querySelector('[data-date-text=checkOut]').textContent = fmtDay(f.checkOut.value);
+    f.querySelector('[data-nights]').textContent = nights(f.checkIn.value, f.checkOut.value);
+  };
+  f.checkIn.addEventListener('change', syncDates);
+  f.checkOut.addEventListener('change', syncDates);
+  // คลิกตรงไหนของช่องวันที่ก็เปิดปฏิทิน
+  f.querySelectorAll('.date-native').forEach((inp) => inp.addEventListener('click', () => { try { inp.showPicker(); } catch { /* เบราว์เซอร์ไม่รองรับ */ } }));
 
   const box = f.querySelector('.guests'), pop = box.querySelector('.guest-pop');
   const sync = () => {
@@ -341,7 +360,10 @@ async function searchPage(q) {
           ${[5, 4, 3].map((n) => `<label class="opt"><input type="checkbox" name="stars" value="${n}" ${stars.has(String(n)) ? 'checked' : ''}> <span class="hstars">${'★'.repeat(n)}</span></label>`).join('')}</div>
       </aside>
       <section>
-        <div class="sortbar"><span>เรียงตาม</span>${SORTS.map(([k, l]) => `<button type="button" data-sort="${k}" class="${k === sort ? 'active' : ''}">${l}</button>`).join('')}</div>
+        <div class="sortbar">
+          <span class="sort-label">${ic('arrow-up-down', 16)} เรียงตาม</span>
+          <div class="sort-opts" role="group" aria-label="เรียงผลการค้นหา">${SORTS.map(([k, icon, l]) => `<button type="button" data-sort="${k}" class="${k === sort ? 'active' : ''}" aria-pressed="${k === sort}">${ic(icon, 16)} ${l}</button>`).join('')}</div>
+        </div>
         <div id="results"><div class="loading"><div class="spinner"></div>กำลังค้นหาห้องว่าง...</div></div>
       </section>
     </div>`;
@@ -386,7 +408,7 @@ async function searchPage(q) {
               <div class="price">${money(per)}</div>
               <div class="small muted">ราคาต่อคืน รวมภาษีแล้ว</div>
               ${h.roomsLeft <= 3 ? `<div class="urgent">เหลือเพียง ${h.roomsLeft} ห้องในราคานี้!</div>` : ''}
-              <span class="btn" style="margin-top:6px">ดูห้องว่าง</span>
+              <span class="btn" style="margin-top:var(--space-2)">ดูห้องว่าง</span>
             </div>
           </div>
         </a>`;
@@ -421,7 +443,7 @@ async function hotelPage(id, q) {
         <div>${hotelStars(h.star_class)}</div>
         <h1>${esc(h.name)}</h1>
         <div style="color:var(--primary)">${ic('map-pin', 16)} ${esc(h.address)}</div>
-        <p style="margin-top:10px">${esc(h.description)}</p>
+        <p style="margin-top:var(--space-3)">${esc(h.description)}</p>
         <div class="highlights">${h.amenities.slice(0, 5).map((a) => `<span>${ic('check', 14)} ${esc(a)}</span>`).join('')}</div>
       </div>
       <div class="side">
@@ -456,7 +478,7 @@ async function hotelPage(id, q) {
               <div class="small muted" style="margin-bottom:6px">${esc(r.description)}</div>
               <ul>
                 <li class="ok">${ic('check', 15)} ${PERK_CANCEL}</li>
-                <li class="ok">${ic('check', 15)} ชำระด้วยบัตรหรือ QR พร้อมเพย์</li>
+                <li class="ok">${ic('check', 15)} ชำระด้วยบัตร, QR พร้อมเพย์ หรือ TrueMoney</li>
                 <li class="ok">${ic('check', 15)} ยืนยันการจองทันที</li>
                 ${qt?.promo ? `<li class="ok">${ic('check', 15)} ${qt.promo}</li>` : ''}
               </ul>
@@ -467,7 +489,7 @@ async function hotelPage(id, q) {
               <div class="small muted">ต่อห้องต่อคืน</div>
               ${qt ? `<div class="small">รวม ${qt.nights} คืน × ${rooms} ห้อง: <b>${money(qt.total)}</b></div>` : ''}
               ${r.available && r.available <= 3 ? `<div class="urgent">เหลือเพียง ${r.available} ห้อง!</div>` : ''}
-              <div style="margin-top:6px">${ok
+              <div style="margin-top:var(--space-2)">${ok
                 ? `<a class="btn" href="#/book?${new URLSearchParams({ hotel: h.id, room: r.id, checkIn: ci, checkOut: co, guests, rooms })}">จองเลย</a>`
                 : `<button class="btn" disabled>${!r.available ? 'ห้องเต็ม' : fits ? 'ห้องไม่พอ' : 'จำนวนคนเกิน'}</button>`}</div>
             </div>
@@ -491,7 +513,7 @@ async function hotelPage(id, q) {
         ${data.reviews.map((rv) => `
           <div class="review2">
             <div class="who">${avatar(rv.name, 'sm')}<div><b>${esc(rv.name)}</b><div class="small muted">${fmtDate(rv.created_at)}</div></div></div>
-            <div><span class="mini-score">${(rv.rating * 2).toFixed(1)}</span><b>${scoreLabel(rv.rating)}</b><p style="margin-top:6px">${esc(rv.comment) || '<span class="muted">-</span>'}</p></div>
+            <div><span class="mini-score">${(rv.rating * 2).toFixed(1)}</span><b>${scoreLabel(rv.rating)}</b><p style="margin-top:var(--space-2)">${esc(rv.comment) || '<span class="muted">-</span>'}</p></div>
           </div>`).join('')}`
         : '<p class="muted">ยังไม่มีรีวิว</p>'}
     </section>`;
@@ -508,7 +530,7 @@ async function hotelPage(id, q) {
   $app.querySelectorAll('.gallery2 .ph').forEach((el) => el.addEventListener('click', () => {
     let i = Number(el.dataset.shot);
     const m = modal(`<div class="ph" style="height:min(70vh,520px);background:#111"><img id="lb-img" src="${IMG(shots[i], 1400)}" alt="" style="object-fit:contain"></div>
-      <div class="row between" style="margin-top:12px"><button class="btn secondary sm" id="lb-prev">‹ ก่อนหน้า</button><b id="lb-count">${i + 1} / ${shots.length}</b><button class="btn secondary sm" id="lb-next">ถัดไป ›</button><button class="btn sm" data-close>ปิด</button></div>`, { wide: true });
+      <div class="row between" style="margin-top:var(--space-3)"><button class="btn secondary sm" id="lb-prev">‹ ก่อนหน้า</button><b id="lb-count">${i + 1} / ${shots.length}</b><button class="btn secondary sm" id="lb-next">ถัดไป ›</button><button class="btn sm" data-close>ปิด</button></div>`, { wide: true });
     const show = (d) => { i = (i + d + shots.length) % shots.length; m.el.querySelector('#lb-img').src = IMG(shots[i], 1400); m.el.querySelector('#lb-count').textContent = `${i + 1} / ${shots.length}`; };
     m.el.querySelector('#lb-prev').addEventListener('click', () => show(-1));
     m.el.querySelector('#lb-next').addEventListener('click', () => show(1));
@@ -542,7 +564,7 @@ async function bookPage(q) {
           <div class="field"><label>จำนวนผู้เข้าพัก</label><input name="guests" type="number" min="1" max="${room.capacity * rooms}" value="${Math.min(guests, room.capacity * rooms)}"></div>
           <div class="field"><label>จำนวนห้อง</label><input type="number" value="${rooms}" disabled></div>
         </div>
-        <h3 style="margin-top:8px">ความต้องการพิเศษ</h3>
+        <h3 style="margin-top:var(--space-2)">ความต้องการพิเศษ</h3>
         <div class="field"><textarea name="specialRequest" placeholder="เช่น ขอห้องชั้นสูง, เตียงเสริม, เช็คอินดึก"></textarea>
           <div class="hint">ทางโรงแรมจะพยายามจัดให้ตามความเหมาะสม</div></div>
         <hr>
@@ -553,11 +575,11 @@ async function bookPage(q) {
           <li>ยกเลิกน้อยกว่า 3 วันก่อนเช็คอิน ไม่คืนเงิน</li>
         </ul>
         <label class="check"><input type="checkbox" required> ฉันยอมรับเงื่อนไขการจองและนโยบายการยกเลิก</label>
-        <button class="btn block" style="margin-top:16px">ยืนยันการจองและไปหน้าชำระเงิน →</button>
+        <button class="btn block" style="margin-top:var(--space-4)">ยืนยันการจองและไปหน้าชำระเงิน →</button>
       </form>
       <div class="summary"><div class="card">
         ${cover(h.hue, h.icon, h.photos)}
-        <h3 style="margin-top:12px">${esc(h.name)}</h3>
+        <h3 style="margin-top:var(--space-3)">${esc(h.name)}</h3>
         <div class="muted small">${esc(room.type)} · ${esc(room.bed)}</div>
         <hr>
         <div class="line"><span>เช็คอิน</span><b>${fmtDate(ci)}</b></div>
@@ -600,6 +622,13 @@ function fakeQr(seed) {
   return `<svg viewBox="0 0 ${N} ${N}" shape-rendering="crispEdges" fill="#111">${cells.join('')}</svg>`;
 }
 
+const PAY_METHODS = [
+  { key: 'card', icon: 'credit-card', title: 'บัตรเครดิต/เดบิต', sub: 'Visa · Mastercard · JCB' },
+  { key: 'qr', icon: 'qr-code', title: 'QR พร้อมเพย์', sub: 'สแกนจ่ายผ่านแอปธนาคารใดก็ได้' },
+  { key: 'truemoney', icon: 'smartphone', title: 'TrueMoney Wallet', sub: 'ชำระด้วยเบอร์มือถือที่ผูกกับ Wallet' },
+];
+const payOption = (m) => `<span class="dd-ic pm-${m.key}">${ic(m.icon, 20)}</span><span class="dd-text"><b>${m.title}</b><small>${m.sub}</small></span>`;
+
 async function payPage(id) {
   if (!requireLogin()) return;
   loading();
@@ -611,10 +640,18 @@ async function payPage(id) {
     <div class="two-col">
       <div class="card" id="pay-card">
         <div id="err"></div>
-        <div class="tabs" id="method">
-          <button type="button" data-m="card" class="active">${ic('credit-card')} บัตรเครดิต/เดบิต</button>
-          <button type="button" data-m="qr">${ic('qr-code')} QR พร้อมเพย์</button>
+        <div class="field">
+          <label id="pm-label">วิธีการชำระเงิน</label>
+          <div class="dropdown" id="method">
+            <button type="button" class="dd-toggle" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="pm-label">
+              <span class="dd-current">${payOption(PAY_METHODS[0])}</span><span class="dd-caret">${ic('chevron-down', 18)}</span>
+            </button>
+            <ul class="dd-menu" role="listbox" aria-labelledby="pm-label" hidden>
+              ${PAY_METHODS.map((m, i) => `<li role="option" data-m="${m.key}" aria-selected="${i === 0}" tabindex="-1">${payOption(m)}<span class="dd-check">${ic('check', 16)}</span></li>`).join('')}
+            </ul>
+          </div>
         </div>
+        <hr>
         <div id="method-body"></div>
       </div>
       <div class="summary"><div class="card">
@@ -639,7 +676,8 @@ async function payPage(id) {
         <div class="result-icon ok">${ic('circle-check', 56)}</div>
         <h2 style="text-align:center">ชำระเงินสำเร็จ</h2>
         <p class="muted" style="text-align:center">${esc(r.message)}<br>การจองของคุณได้รับการยืนยันแล้ว และระบบได้ส่งการแจ้งเตือนทางอีเมล/SMS</p>
-        <a class="btn block" href="#/booking/${b.id}">ดูใบยืนยันการจอง</a>`;
+        <a class="btn block" href="#/voucher/${b.id}">${ic('ticket')} เปิดใบยืนยันการจอง</a>
+        <a class="btn ghost block" style="margin-top:var(--space-2)" href="#/booking/${b.id}">ดูรายละเอียดการจอง</a>`;
       refreshUnread();
     } else {
       $err.innerHTML = `<div class="alert error">${ic('circle-x', 16)} ชำระเงินไม่สำเร็จ: ${esc(r.message)}<br><span class="small">กรุณาตรวจสอบข้อมูลแล้วลองใหม่ หรือเปลี่ยนวิธีชำระเงิน</span></div>`;
@@ -678,7 +716,7 @@ async function payPage(id) {
       $body.innerHTML = `
         <div class="qr-box">
           ${fakeQr(qr.transactionRef)}
-          <p style="margin-top:12px"><b>${money(qr.amount)}</b><br><span class="small muted">อ้างอิง ${esc(qr.transactionRef)} · หมดอายุใน 15 นาที</span></p>
+          <p style="margin-top:var(--space-3)"><b>${money(qr.amount)}</b><br><span class="small muted">อ้างอิง ${esc(qr.transactionRef)} · หมดอายุใน 15 นาที</span></p>
           <p class="small muted">สแกนด้วยแอปธนาคารเพื่อชำระเงิน (QR จำลองสำหรับระบบทดสอบ)</p>
           <button class="btn" id="qr-done">ฉันชำระเงินแล้ว — ตรวจสอบสถานะ</button>
         </div>`;
@@ -689,13 +727,54 @@ async function payPage(id) {
     } catch (err) { $body.innerHTML = `<div class="alert error">${esc(err.message)}</div>`; }
   };
 
-  document.getElementById('method').addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-m]');
-    if (!btn) return;
-    document.querySelectorAll('#method button').forEach((x) => x.classList.toggle('active', x === btn));
+  const renderTrueMoney = () => {
+    $body.innerHTML = `
+      <form id="tm-form">
+        <div class="field"><label>เบอร์โทรศัพท์ที่ผูกกับ TrueMoney Wallet</label><input name="phone" inputmode="tel" placeholder="08x-xxx-xxxx" maxlength="12" value="${esc(state.user.phone || '')}" required>
+          <div class="hint">ระบบจะส่งคำขอชำระเงินไปที่แอป TrueMoney ของเบอร์นี้</div></div>
+        <div class="alert info small">${ic('info', 15)} ระบบทดสอบ: เบอร์ 10 หลักใดก็ได้ = สำเร็จ · เบอร์ลงท้าย <b>0000</b> = ยอดเงินใน Wallet ไม่พอ</div>
+        <button class="btn block">ชำระด้วย TrueMoney ${money(b.amount_due)}</button>
+      </form>`;
+    const f = document.getElementById('tm-form');
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      $err.innerHTML = '';
+      try { showResult(await withButton(f.querySelector('button'), () => api('POST', `/bookings/${b.id}/truemoney`, formData(f)))); }
+      catch (err) { $err.innerHTML = `<div class="alert error">${esc(err.message)}</div>`; }
+    });
+  };
+  const renderers = { card: renderCard, qr: renderQr, truemoney: renderTrueMoney };
+
+  // dropdown เลือกวิธีชำระเงิน
+  const $dd = document.getElementById('method');
+  const $toggle = $dd.querySelector('.dd-toggle'), $menu = $dd.querySelector('.dd-menu');
+  const options = [...$menu.querySelectorAll('[role=option]')];
+  const setOpen = (open) => {
+    $menu.hidden = !open;
+    $toggle.setAttribute('aria-expanded', open);
+    if (open) ($menu.querySelector('[aria-selected=true]') || options[0]).focus();
+  };
+  const choose = (li) => {
+    options.forEach((o) => o.setAttribute('aria-selected', o === li));
+    $dd.querySelector('.dd-current').innerHTML = payOption(PAY_METHODS.find((m) => m.key === li.dataset.m));
+    setOpen(false); $toggle.focus();
     $err.innerHTML = '';
-    btn.dataset.m === 'card' ? renderCard() : renderQr();
+    renderers[li.dataset.m]();
+  };
+  $toggle.addEventListener('click', () => setOpen($menu.hidden));
+  $menu.addEventListener('click', (e) => { const li = e.target.closest('[role=option]'); if (li) choose(li); });
+  $dd.addEventListener('keydown', (e) => {
+    const i = options.indexOf(document.activeElement);
+    if (e.key === 'Escape') { setOpen(false); $toggle.focus(); }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if ($menu.hidden) return setOpen(true);
+      options[(i + (e.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length].focus();
+    } else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); choose(options[i]); }
   });
+  const outside = (e) => { if (!$dd.contains(e.target)) setOpen(false); };
+  document.addEventListener('click', outside);
+  cleanup = () => document.removeEventListener('click', outside);
   renderCard();
 }
 
@@ -734,9 +813,9 @@ async function bookingPage(id) {
             <div><div class="small muted">รหัสการจอง</div><div class="code-big">${esc(b.code)}</div></div>
             ${statusPill(b.status)}
           </div>
-          ${b.status !== 'cancelled' ? timeline(b) : `<div class="alert error" style="margin-top:12px">การจองนี้ถูกยกเลิกเมื่อ ${fmtDateTime(b.cancelled_at)}</div>`}
-          ${b.status === 'pending' ? `<div class="alert warning" style="margin-top:12px">รอชำระเงิน ${money(b.amount_due)} เพื่อยืนยันการจอง</div>` : ''}
-          ${b.status === 'confirmed' ? `<div class="alert success" style="margin-top:12px">${ic('circle-check', 16)} การจองได้รับการยืนยันแล้ว — แสดงรหัสการจองนี้ที่เคาน์เตอร์เมื่อเช็คอิน</div>` : ''}
+          ${b.status !== 'cancelled' ? timeline(b) : `<div class="alert error" style="margin-top:var(--space-3)">การจองนี้ถูกยกเลิกเมื่อ ${fmtDateTime(b.cancelled_at)}</div>`}
+          ${b.status === 'pending' ? `<div class="alert warning" style="margin-top:var(--space-3)">รอชำระเงิน ${money(b.amount_due)} เพื่อยืนยันการจอง</div>` : ''}
+          ${b.status === 'confirmed' ? `<div class="alert success" style="margin-top:var(--space-3)">${ic('circle-check', 16)} การจองได้รับการยืนยันแล้ว — แสดงรหัสการจองนี้ที่เคาน์เตอร์เมื่อเช็คอิน</div>` : ''}
         </div>
         <div class="card">
           <h2>รายละเอียดการเข้าพัก</h2>
@@ -753,7 +832,7 @@ async function bookingPage(id) {
         <div class="card">
           <h3>ประวัติการชำระเงิน</h3>
           ${b.payments.length ? `<div class="table-wrap"><table><tr><th>วันที่</th><th>รายการ</th><th>จำนวน</th><th>สถานะ</th><th>อ้างอิง</th></tr>
-            ${b.payments.map((p) => `<tr><td>${fmtDateTime(p.created_at)}</td><td>${p.kind === 'refund' ? `${ic('undo-2', 15)} คืนเงิน` : p.method === 'qr' ? `${ic('qr-code', 15)} QR` : `${ic('credit-card', 15)} บัตร`}<div class="small muted">${esc(p.message || '')}</div></td>
+            ${b.payments.map((p) => `<tr><td>${fmtDateTime(p.created_at)}</td><td>${p.kind === 'refund' ? `${ic('undo-2', 15)} คืนเงิน` : p.method === 'qr' ? `${ic('qr-code', 15)} QR` : p.method === 'truemoney' ? `${ic('wallet', 15)} TrueMoney` : `${ic('credit-card', 15)} บัตร`}<div class="small muted">${esc(p.message || '')}</div></td>
               <td>${p.kind === 'refund' ? '-' : ''}${money(p.amount)}</td>
               <td><span class="pill ${p.status === 'success' ? 'confirmed' : p.status === 'failed' ? 'cancelled' : 'pending'}">${{ success: 'สำเร็จ', failed: 'ไม่สำเร็จ', pending: 'รอดำเนินการ' }[p.status]}</span></td>
               <td class="small">${esc(p.transaction_ref || '-')}</td></tr>`).join('')}</table></div>` : '<p class="muted small">ยังไม่มีรายการ</p>'}
@@ -762,13 +841,15 @@ async function bookingPage(id) {
       <div class="summary">
         <div class="card">
           ${cover(b.hue, b.icon, b.photos)}
-          <div class="line" style="margin-top:12px"><span>ราคารวม</span><b>${money(b.total_price)}</b></div>
+          <div class="line" style="margin-top:var(--space-3)"><span>ราคารวม</span><b>${money(b.total_price)}</b></div>
           <div class="line"><span>ชำระแล้ว (สุทธิ)</span><span>${money(b.paid_amount)}</span></div>
           ${b.amount_due > 0 && b.status === 'pending' ? `<div class="line total"><span>คงค้าง</span><span>${money(b.amount_due)}</span></div>` : ''}
-          <div class="stack" style="margin-top:14px" id="actions">
+          <div class="stack" style="margin-top:var(--space-4)" id="actions">
             ${b.status === 'pending' && !isAdmin ? `<a class="btn block" href="#/pay/${b.id}">${ic('credit-card')} ชำระเงิน</a>` : ''}
-            ${b.status === 'confirmed' ? `<button class="btn block" data-act="checkin">${ic('concierge-bell')} เช็คอิน</button>` : ''}
-            ${b.status === 'checked_in' ? `<button class="btn block" data-act="checkout">${ic('luggage')} เช็คเอาท์</button>` : ''}
+            ${hasVoucher(b) ? `<a class="btn ${isAdmin ? 'secondary' : ''} block" href="#/voucher/${b.id}">${ic('ticket')} เปิดใบยืนยันการจอง</a>` : ''}
+            ${b.status === 'confirmed' && isAdmin ? `<button class="btn block" data-act="checkin">${ic('concierge-bell')} เช็คอิน</button>` : ''}
+            ${b.status === 'checked_in' && isAdmin ? `<button class="btn block" data-act="checkout">${ic('luggage')} เช็คเอาท์</button>` : ''}
+            ${['confirmed', 'checked_in'].includes(b.status) && !isAdmin ? `<div class="alert info small">${ic('concierge-bell', 15)} ${b.status === 'confirmed' ? 'เช็คอินที่เคาน์เตอร์โรงแรม' : 'เช็คเอาท์ที่เคาน์เตอร์โรงแรม'} โดยเจ้าหน้าที่จะอัปเดตสถานะให้</div>` : ''}
             ${canEdit && !isAdmin ? `<button class="btn secondary block" data-act="edit">${ic('pencil')} แก้ไขวันเข้าพัก</button>` : ''}
             ${canEdit && !isAdmin ? `<button class="btn ghost block" style="color:var(--danger)" data-act="cancel">ยกเลิกการจอง</button>` : ''}
           </div>
@@ -783,7 +864,7 @@ async function bookingPage(id) {
   } else if (b.status === 'checked_out' && !isAdmin) {
     $rv.innerHTML = `<h3>ให้คะแนนและรีวิว</h3>
       <form id="rv-form">${starInput()}
-        <div class="field" style="margin-top:10px"><textarea name="comment" placeholder="เล่าประสบการณ์การเข้าพักของคุณ..."></textarea></div>
+        <div class="field" style="margin-top:var(--space-3)"><textarea name="comment" placeholder="เล่าประสบการณ์การเข้าพักของคุณ..."></textarea></div>
         <button class="btn">ยืนยันการให้คะแนนและรีวิว</button></form>`;
     const f = document.getElementById('rv-form');
     bindStarInput(f);
@@ -823,7 +904,7 @@ function editDatesModal(b) {
         <div class="field"><label>เช็คเอาท์ใหม่</label><input type="date" name="checkOut" min="${addDays(b.check_in, 1)}" value="${b.check_out}" required></div>
       </div>
       <div id="qt" class="card" style="box-shadow:none;background:var(--surface-2)"></div>
-      <div class="row" style="justify-content:flex-end;margin-top:16px">
+      <div class="row" style="justify-content:flex-end;margin-top:var(--space-4)">
         <button type="button" class="btn secondary" data-close>ยกเลิก</button>
         <button class="btn" id="save" disabled>บันทึกการแก้ไข</button>
       </div>
@@ -865,12 +946,12 @@ async function cancelModal(b) {
     <p class="muted">เหลืออีก ${p.daysBefore} วันก่อนวันเช็คอิน</p>
     <div class="card" style="box-shadow:none;background:var(--surface-2)">
       <div class="small">${ic('file-text', 15)} ${esc(p.rule)}</div>
-      <div class="line" style="margin-top:8px"><span>ยอดที่ชำระแล้ว</span><span>${money(p.paid)}</span></div>
+      <div class="line" style="margin-top:var(--space-2)"><span>ยอดที่ชำระแล้ว</span><span>${money(p.paid)}</span></div>
       <div class="line"><span>อัตราคืนเงิน</span><span>${p.percent}%</span></div>
       <div class="line total"><span>ยอดเงินที่จะได้รับคืน</span><span style="color:var(--success)">${money(p.refund)}</span></div>
     </div>
-    <p class="small muted" style="margin-top:10px">เงินจะถูกคืนเข้าช่องทางเดิมภายใน 7–14 วันทำการ</p>
-    <div class="row" style="justify-content:flex-end;margin-top:16px">
+    <p class="small muted" style="margin-top:var(--space-3)">เงินจะถูกคืนเข้าช่องทางเดิมภายใน 7–14 วันทำการ</p>
+    <div class="row" style="justify-content:flex-end;margin-top:var(--space-4)">
       <button class="btn secondary" data-close>ไม่ยกเลิก</button>
       <button class="btn danger" id="yes">ยืนยันการยกเลิก</button>
     </div>`);
@@ -882,141 +963,382 @@ async function cancelModal(b) {
   });
 }
 
+// ================= Pages: Voucher (ใบยืนยันการจอง) =================
+async function voucherPage(id) {
+  if (!requireLogin()) return;
+  loading();
+  const b = await api('GET', `/bookings/${id}`);
+  const back = `<a href="#/booking/${b.id}">← กลับไปหน้ารายละเอียดการจอง</a>`;
+  if (!hasVoucher(b)) {
+    $app.innerHTML = `<p>${back}</p><div class="card empty"><div class="icon">${ic('ticket', 40)}</div>
+      ${b.status === 'cancelled' ? 'การจองนี้ถูกยกเลิกแล้ว จึงไม่มีใบยืนยันการจอง' : 'ใบยืนยันการจองจะออกให้หลังชำระเงินเรียบร้อยแล้ว'}
+      ${b.status === 'pending' && state.user.role !== 'admin' ? `<br><a class="btn" style="margin-top:var(--space-3)" href="#/pay/${b.id}">${ic('credit-card')} ชำระเงิน</a>` : ''}</div>`;
+    return;
+  }
+  const paid = b.payments.find((p) => p.kind !== 'refund' && p.status === 'success');
+  const issued = new Date().toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+  const item = (label, value, sub = '') => `<div class="v-item"><div class="v-label">${label}</div><div class="v-value">${value}</div>${sub ? `<div class="v-sub">${sub}</div>` : ''}</div>`;
+
+  $app.innerHTML = `
+    <div class="v-toolbar no-print">
+      ${back}
+      <button class="btn" id="print">${ic('printer')} พิมพ์ / บันทึกเป็น PDF</button>
+    </div>
+    <article class="voucher">
+      <header class="v-head">
+        <div class="v-brand"><img class="brand-logo" src="/img/logo.png" alt="" width="40" height="40"><div><b>อัศวินรัตติกาล</b><div class="v-sub">ใบยืนยันการจอง · Booking Voucher</div></div></div>
+        ${statusPill(b.status)}
+      </header>
+
+      <section class="v-code">
+        <div>
+          <div class="v-label">รหัสการจอง</div>
+          <div class="code-big">${esc(b.code)}</div>
+          <p class="v-sub">แสดงรหัสหรือ QR นี้ที่เคาน์เตอร์โรงแรมเมื่อเช็คอิน พร้อมบัตรประชาชน/พาสปอร์ตของผู้เข้าพัก</p>
+          <div class="v-paid">${ic('circle-check', 16)} ชำระเงินครบแล้ว ${money(b.paid_amount)}</div>
+        </div>
+        <div class="v-qr">${fakeQr(b.code)}</div>
+      </section>
+
+      <section class="v-section">
+        <h3>ที่พัก</h3>
+        <div class="v-hotel"><b>${esc(b.hotel_name)}</b><div class="v-sub">${ic('map-pin', 14)} ${esc(b.address || b.city)}</div></div>
+        <div class="v-grid">
+          ${item('เช็คอิน', fmtDate(b.check_in), 'ตั้งแต่ 14:00 น.')}
+          ${item('เช็คเอาท์', fmtDate(b.check_out), 'ก่อน 12:00 น.')}
+          ${item('ระยะเวลา', `${b.nights} คืน`)}
+          ${item('ห้องพัก', `${esc(b.room_type)} × ${b.rooms_count} ห้อง`)}
+        </div>
+      </section>
+
+      <section class="v-section">
+        <h3>ผู้เข้าพัก</h3>
+        <div class="v-grid">
+          ${item('ชื่อผู้เข้าพักหลัก', esc(b.guest_name), `${b.guests} คน`)}
+          ${item('ติดต่อ', esc(b.guest_phone || '-'), esc(b.guest_email || ''))}
+          ${item('วันที่จอง', fmtDateTime(b.created_at))}
+          ${item('ความต้องการพิเศษ', esc(b.special_request) || '-')}
+        </div>
+      </section>
+
+      <section class="v-section">
+        <h3>การชำระเงิน</h3>
+        <div class="line"><span>ราคารวม (${b.nights} คืน × ${b.rooms_count} ห้อง)</span><span>${money(b.total_price)}</span></div>
+        ${paid ? `<div class="line"><span>ชำระด้วย</span><span>${PAY_LABEL[paid.method] || esc(paid.method)}</span></div>
+        <div class="line"><span>เลขอ้างอิง</span><span>${esc(paid.transaction_ref || '-')}</span></div>` : ''}
+        <div class="line total"><span>ชำระแล้ว</span><span>${money(b.paid_amount)}</span></div>
+      </section>
+
+      <footer class="v-foot">
+        <div><b>นโยบายการยกเลิก:</b> ยกเลิกล่วงหน้า 7 วันขึ้นไป คืนเงิน 100% · 3–6 วัน คืนเงิน 50% · น้อยกว่า 3 วัน ไม่คืนเงิน</div>
+        <div>เอกสารนี้ออกโดยระบบอัตโนมัติ ใช้เป็นหลักฐานการจองได้โดยไม่ต้องมีลายเซ็น · ออกเมื่อ ${issued}</div>
+      </footer>
+    </article>`;
+  document.getElementById('print').addEventListener('click', () => window.print());
+}
+
+// แท็บแบบมีตัวนับ ใช้ร่วมกันหลายหน้า
+const pageTabs = (items, active, attr = 'data-tab') => `<nav class="page-tabs" role="tablist">${items.map(([k, label, count, icon]) =>
+  `<button type="button" role="tab" ${attr}="${k}" class="${k === active ? 'active' : ''}" aria-selected="${k === active}">${icon ? ic(icon, 16) : ''} ${label}${count != null ? ` <span class="tab-count">${count}</span>` : ''}</button>`).join('')}</nav>`;
+
+const daysUntil = (iso) => nights(todayISO(), iso);
+function tripCountdown(b) {
+  if (b.status === 'checked_in') return { cls: 'live', text: 'กำลังเข้าพักอยู่' };
+  const d = daysUntil(b.check_in);
+  return { cls: d <= 3 ? 'soon' : '', text: d <= 0 ? 'เช็คอินวันนี้' : d === 1 ? 'เช็คอินพรุ่งนี้' : `อีก ${d} วันเช็คอิน` };
+}
+
+function bookingCard(b, tab) {
+  const n = nights(b.check_in, b.check_out);
+  const cd = tab === 'upcoming' ? tripCountdown(b) : null;
+  return `
+    <article class="bk-card ${b.status === 'cancelled' ? 'is-cancelled' : ''}">
+      <a class="bk-photo" href="#/booking/${b.id}">${photo(photosOf(b.photos)[0], { hue: b.hue, w: 500 })}<span class="bk-status">${statusPill(b.status)}</span></a>
+      <div class="bk-main">
+        <div class="bk-top">
+          <h3><a href="#/booking/${b.id}">${esc(b.hotel_name)}</a></h3>
+          ${cd ? `<span class="countdown ${cd.cls}">${ic('calendar-days', 14)} ${cd.text}</span>` : ''}
+        </div>
+        <div class="bk-loc">${ic('map-pin', 14)} ${esc(b.city)}</div>
+        <div class="bk-dates">
+          <div><small>เช็คอิน</small><b>${fmtDay(b.check_in)}</b></div>
+          <div class="bk-nights"><span>${n} คืน</span></div>
+          <div><small>เช็คเอาท์</small><b>${fmtDay(b.check_out)}</b></div>
+        </div>
+        <div class="bk-meta">
+          <span>${ic('bed-double', 14)} ${esc(b.room_type)} × ${b.rooms_count}</span>
+          <span>${ic('users', 14)} ${b.guests} คน</span>
+          <span>${ic('ticket', 14)} <code>${esc(b.code)}</code></span>
+        </div>
+      </div>
+      <div class="bk-side">
+        <div><small class="muted">${b.status === 'pending' ? 'ยอดที่ต้องชำระ' : 'ราคารวม'}</small><div class="bk-price">${money(b.status === 'pending' ? b.total_price - b.paid_amount : b.total_price)}</div></div>
+        <div class="bk-actions">
+          ${b.status === 'pending' ? `<a class="btn sm" href="#/pay/${b.id}">${ic('credit-card', 15)} ชำระเงิน</a>` : ''}
+          ${hasVoucher(b) && b.status !== 'checked_out' ? `<a class="btn sm" href="#/voucher/${b.id}">${ic('ticket', 15)} ใบจอง</a>` : ''}
+          ${b.status === 'checked_out' && !b.reviewed ? `<a class="btn sm" href="#/booking/${b.id}">${ic('star', 15)} เขียนรีวิว</a>` : ''}
+          ${b.status === 'checked_out' ? `<a class="btn secondary sm" href="#/voucher/${b.id}">${ic('ticket', 15)} ใบจอง</a>` : ''}
+          <a class="btn secondary sm" href="#/booking/${b.id}">${['pending', 'confirmed'].includes(b.status) ? `${ic('pencil', 15)} จัดการ` : 'รายละเอียด'}</a>
+        </div>
+      </div>
+    </article>`;
+}
+
 async function bookingsPage(q) {
   if (!requireLogin()) return;
   loading();
   const all = await api('GET', '/bookings');
   const tab = q.get('tab') || 'upcoming';
   const groups = {
-    upcoming: all.filter((b) => ['pending', 'confirmed', 'checked_in'].includes(b.status)),
+    upcoming: all.filter((b) => ['pending', 'confirmed', 'checked_in'].includes(b.status)).sort((a, b) => a.check_in.localeCompare(b.check_in)),
     past: all.filter((b) => b.status === 'checked_out'),
     cancelled: all.filter((b) => b.status === 'cancelled'),
   };
-  const list = groups[tab];
+  const spent = all.reduce((sum, b) => sum + (b.paid_amount || 0), 0);
+  const nightsStayed = groups.past.reduce((sum, b) => sum + nights(b.check_in, b.check_out), 0);
+  // ทริปถัดไป: ที่พักอยู่ตอนนี้ หรือที่ยืนยันแล้วและใกล้ที่สุด
+  const next = tab === 'upcoming' ? groups.upcoming.find((b) => b.status !== 'pending') : null;
+  const list = groups[tab].filter((b) => b !== next);
+  const empty = {
+    upcoming: ['luggage', 'ยังไม่มีทริปที่กำลังจะมาถึง', 'เริ่มวางแผนทริปถัดไป แล้วให้ AI ช่วยหาเพื่อนเที่ยวด้วยกัน'],
+    past: ['hotel', 'ยังไม่มีประวัติการเข้าพัก', 'เมื่อเช็คเอาท์แล้ว คุณจะรีวิวที่พักได้จากตรงนี้'],
+    cancelled: ['circle-check', 'ไม่มีการจองที่ถูกยกเลิก', 'ดีมาก! ทุกทริปของคุณยังอยู่ครบ'],
+  }[tab];
+
   $app.innerHTML = `
-    <h1>การจองของฉัน</h1>
-    <div class="tabs" style="max-width:520px">
-      ${[['upcoming', 'กำลังจะมาถึง'], ['past', 'เข้าพักแล้ว'], ['cancelled', 'ยกเลิก']].map(([k, l]) =>
-        `<button class="${k === tab ? 'active' : ''}" onclick="location.hash='#/bookings?tab=${k}'">${l} (${groups[k].length})</button>`).join('')}
+    <div class="page-head">
+      <div><h1>การจองของฉัน</h1><p class="muted">ดูทริปที่กำลังจะมาถึง เปิดใบจอง และจัดการการจองทั้งหมดได้ที่นี่</p></div>
+      <a class="btn" href="#/search">${ic('search', 16)} จองที่พักใหม่</a>
     </div>
-    ${list.length ? list.map((b) => `
-      <div class="card booking-row">
-        ${cover(b.hue, b.icon, b.photos)}
-        <div>
-          <div class="row"><b>${esc(b.hotel_name)}</b>${statusPill(b.status)}</div>
-          <div class="small muted">${esc(b.code)} · ${esc(b.room_type)} × ${b.rooms_count} · ${fmtDate(b.check_in)} – ${fmtDate(b.check_out)} (${nights(b.check_in, b.check_out)} คืน)</div>
-          <div class="small">ราคารวม <b>${money(b.total_price)}</b></div>
+
+    <div class="mini-stats">
+      <div class="mini-stat"><span class="ms-ic">${ic('plane', 20)}</span><div><b>${groups.upcoming.length}</b><small>ทริปที่กำลังจะมาถึง</small></div></div>
+      <div class="mini-stat"><span class="ms-ic">${ic('bed-double', 20)}</span><div><b>${nightsStayed}</b><small>คืนที่เข้าพักแล้ว</small></div></div>
+      <div class="mini-stat"><span class="ms-ic">${ic('wallet', 20)}</span><div><b>${money(spent)}</b><small>ยอดชำระสุทธิทั้งหมด</small></div></div>
+    </div>
+
+    ${pageTabs([['upcoming', 'กำลังจะมาถึง', groups.upcoming.length, 'calendar-days'], ['past', 'เข้าพักแล้ว', groups.past.length, 'circle-check'], ['cancelled', 'ยกเลิก', groups.cancelled.length, 'circle-x']], tab)}
+
+    ${next ? (() => {
+      const cd = tripCountdown(next);
+      return `
+      <section class="next-trip" style="--trip:url('${IMG(photosOf(next.photos)[0], 1200)}')">
+        <div class="nt-body">
+          <span class="nt-kicker">${ic('plane', 16)} ทริปถัดไปของคุณ</span>
+          <h2>${esc(next.hotel_name)}</h2>
+          <div class="nt-loc">${ic('map-pin', 15)} ${esc(next.city)} · ${esc(next.room_type)} × ${next.rooms_count}</div>
+          <div class="nt-dates">${fmtDay(next.check_in)} → ${fmtDay(next.check_out)} · ${nights(next.check_in, next.check_out)} คืน</div>
+          <div class="nt-actions">
+            <a class="btn" href="#/voucher/${next.id}">${ic('ticket', 16)} เปิดใบจอง</a>
+            <a class="btn nt-ghost" href="#/booking/${next.id}">ดูรายละเอียด</a>
+          </div>
         </div>
-        <div class="row">
-          ${b.status === 'pending' ? `<a class="btn sm" href="#/pay/${b.id}">ชำระเงิน</a>` : ''}
-          ${b.status === 'checked_out' && !b.reviewed ? `<a class="btn sm" href="#/booking/${b.id}">${ic('star', 15)} รีวิว</a>` : ''}
-          <a class="btn secondary sm" href="#/booking/${b.id}">${['pending', 'confirmed'].includes(b.status) ? 'จัดการ' : 'รายละเอียด'}</a>
-        </div>
-      </div>`).join('')
-      : `<div class="card empty"><div class="icon">${ic('luggage', 40)}</div>ยังไม่มีการจองในหมวดนี้<br><a class="btn" style="margin-top:12px" href="#/search">ค้นหาโรงแรม</a></div>`}`;
+        <div class="nt-count ${cd.cls}">${next.status === 'checked_in' ? `${ic('concierge-bell', 28)}<span>กำลังเข้าพัก</span>` : (() => { const d = daysUntil(next.check_in); return d <= 0 ? `<b>วันนี้</b><span>เช็คอิน</span>` : `<b>${d}</b><span>วันก่อนเช็คอิน</span>`; })()}</div>
+      </section>
+      ${list.length ? '<h3 class="list-title">ทริปอื่น ๆ</h3>' : ''}`;
+    })() : ''}
+
+    ${list.length ? `<div class="bk-list">${list.map((b) => bookingCard(b, tab)).join('')}</div>`
+      : next ? '' : `<div class="card empty"><div class="icon">${ic(empty[0], 40)}</div><b>${empty[1]}</b><p class="muted small">${empty[2]}</p><a class="btn" href="#/search">${ic('search', 16)} ค้นหาโรงแรม</a></div>`}`;
+
+  $app.querySelector('.page-tabs').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-tab]');
+    if (t) go(`#/bookings?tab=${t.dataset.tab}`);
+  });
 }
 
 // ================= Pages: Buddy =================
-const INTEREST_PRESETS = ['คาเฟ่', 'อาหาร', 'ตลาดกลางคืน', 'ถ่ายรูป', 'เดินป่า', 'ธรรมชาติ', 'ทะเล', 'ดำน้ำ', 'ปีนเขา', 'วัฒนธรรม', 'วัด', 'ช้อปปิ้ง', 'ปั่นจักรยาน', 'Co-working', 'ปาร์ตี้', 'สปา'];
+// คัดเฉพาะความสนใจยอดนิยม 8 อย่าง — อย่างอื่นพิมพ์เพิ่มเองได้
+const INTEREST_PRESETS = ['คาเฟ่', 'อาหาร', 'ทะเล', 'ธรรมชาติ', 'เดินป่า', 'ถ่ายรูป', 'วัฒนธรรม', 'ช้อปปิ้ง'];
+const compatLabel = (s) => (s >= 80 ? 'เข้ากันได้ดีมาก' : s >= 60 ? 'เข้ากันได้ดี' : s >= 40 ? 'พอเข้ากันได้' : 'เข้ากันได้น้อย');
 
-async function buddyPage() {
-  if (!requireLogin()) return;
-  loading();
-  const [me, matches] = await Promise.all([api('GET', '/buddy/profile'), api('GET', '/buddy/matches')]);
-  const interests = new Set(me.interests);
+const TRAVEL_STYLES = ['ชิล ๆ', 'ลุย ๆ', 'ผจญภัย', 'หรูหรา', 'ประหยัด'];
+const compatLevel = (s) => (s >= 80 ? 'high' : s >= 60 ? 'mid' : 'low');
+const personMeta = (u) => [u.age ? u.age + ' ปี' : '', esc(u.gender || ''), esc(u.travel_style || '')].filter(Boolean).join(' · ');
+let buddyCache = null; // ผลการจับคู่ล่าสุด (ไม่ต้องให้ AI วิเคราะห์ใหม่ทุกครั้งที่เปิดหน้า)
+const shortDate = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+const tripText = (t) => `${esc(t.city)} · ${shortDate(t.check_in)} – ${shortDate(t.check_out)}`;
+
+// ฟอร์มโปรไฟล์บัดดี้ (ใช้ทั้งตอนเริ่มต้นใช้งานและในหน้าต่างแก้ไข)
+function profileFields(me, { withToggle = true } = {}) {
   const allInterests = [...new Set([...INTEREST_PRESETS, ...me.interests])];
-
-  $app.innerHTML = `
-    <h1>จับคู่บัดดี้ท่องเที่ยว</h1>
-    <p class="muted">หาเพื่อนร่วมทริปที่ไปเที่ยวที่เดียวกัน ช่วงเวลาเดียวกัน และชอบอะไรคล้ายกัน</p>
-    <div class="buddy-layout">
-      <form class="card" id="profile">
-        <h3>โปรไฟล์ของฉัน</h3>
-        <label class="switch"><input type="checkbox" name="buddy_enabled" ${me.buddy_enabled ? 'checked' : ''}> เปิดใช้งานการจับคู่บัดดี้</label>
-        <p class="hint">เมื่อเปิด ผู้ใช้อื่นจะเห็นชื่อ อายุ ความสนใจ และทริปของคุณ</p>
-        <div class="grid grid-2" style="margin-top:12px">
-          <div class="field"><label>เพศ</label><select name="gender">${['', 'ชาย', 'หญิง', 'LGBTQ+', 'ไม่ระบุ'].map((g) => `<option ${me.gender === g ? 'selected' : ''} value="${g}">${g || '-'}</option>`).join('')}</select></div>
-          <div class="field"><label>อายุ</label><input type="number" name="age" min="18" max="99" value="${me.age || ''}"></div>
-        </div>
-        <div class="field"><label>สไตล์การเที่ยว</label><select name="travel_style">${['', 'ชิล ๆ', 'ลุย ๆ', 'ผจญภัย', 'หรูหรา', 'ประหยัด'].map((s) => `<option ${me.travel_style === s ? 'selected' : ''} value="${s}">${s || '-'}</option>`).join('')}</select></div>
-        <div class="field"><label>ความสนใจ</label>
-          <div class="chips" id="chips">${allInterests.map((i) => `<button type="button" class="chip ${interests.has(i) ? 'on' : ''}" data-i="${esc(i)}">${esc(i)}</button>`).join('')}</div>
-          <div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="new-interest" placeholder="เพิ่มความสนใจอื่น ๆ"><button type="button" class="btn secondary sm" id="add-interest">เพิ่ม</button></div>
-        </div>
-        <div class="field"><label>แนะนำตัว</label><textarea name="bio" maxlength="300" placeholder="เล่าเกี่ยวกับตัวคุณและสไตล์การเที่ยว">${esc(me.bio || '')}</textarea></div>
-        <button class="btn block">บันทึกโปรไฟล์</button>
-      </form>
-
-      <div>
-        <div class="ai-banner">
-          <div class="icon">${ic('bot', 30)}</div>
-          <div style="flex:1"><b>AI Agent จับคู่บัดดี้</b><div class="small muted">วิเคราะห์ทริปที่จองไว้ ความสนใจ และสไตล์การเที่ยว เพื่อประเมินความเข้ากันได้</div></div>
-          <button class="btn" id="suggest" ${me.buddy_enabled ? '' : 'disabled'}>${ic('sparkles')} หาบัดดี้ให้ฉัน</button>
-        </div>
-        <div id="suggestions">${me.buddy_enabled ? '' : '<div class="alert info">เปิดใช้งานการจับคู่และเลือกความสนใจในโปรไฟล์ก่อน แล้วกดบันทึก</div>'}</div>
-
-        <div class="card">
-          <h3>คำขอที่ได้รับ (${matches.incoming.length})</h3>
-          ${matches.incoming.length ? matches.incoming.map((m) => `
-            <div class="buddy-card" style="margin-top:12px">
-              ${avatar(m.other.name)}
-              <div>
-                <b>${esc(m.other.name)}</b> <span class="muted small">${m.other.age ? m.other.age + ' ปี' : ''} ${esc(m.other.gender || '')}</span>
-                <div class="small">${esc(m.other.bio || '')}</div>
-                <div>${m.other.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>
-                ${m.reason ? `<div class="ai-reason">${ic('bot', 15)} ${esc(m.reason)}</div>` : ''}
-              </div>
-              <div class="stack">
-                <button class="btn sm" data-respond="${m.id}" data-accept="1">${ic('check', 15)} ยืนยันจับคู่</button>
-                <button class="btn secondary sm" data-respond="${m.id}" data-accept="0">ปฏิเสธ</button>
-              </div>
-            </div>`).join('') : '<p class="muted small">ยังไม่มีคำขอใหม่</p>'}
-        </div>
-
-        <div class="card">
-          <h3>บัดดี้ของฉัน (${matches.accepted.length})</h3>
-          ${matches.accepted.length ? matches.accepted.map((m) => `
-            <a class="row" href="#/chat/${m.id}" style="color:inherit;padding:10px 0;border-top:1px solid var(--border);flex-wrap:nowrap;text-decoration:none">
-              ${avatar(m.other.name, 'sm')}
-              <div style="flex:1;min-width:0"><b>${esc(m.other.name)}</b>
-                <div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${m.last_message ? esc(m.last_message.text) : 'เริ่มบทสนทนาได้เลย'}</div></div>
-              <span class="btn secondary sm">${ic('message-circle', 15)} แชท</span>
-            </a>`).join('') : '<p class="muted small">ยังไม่มีบัดดี้ ลองให้ AI Agent ช่วยหาดูสิ</p>'}
-        </div>
-
-        ${matches.outgoing.length ? `<div class="card"><h3>คำขอที่ส่งไปแล้ว (รอการตอบรับ)</h3>
-          ${matches.outgoing.map((m) => `<div class="row" style="padding:6px 0">${avatar(m.other.name, 'sm')}<b>${esc(m.other.name)}</b><span class="pill pending">รอตอบรับ</span></div>`).join('')}</div>` : ''}
+  return `
+    ${withToggle ? `<label class="switch-box ${me.buddy_enabled ? 'on' : ''}">
+      <span class="switch"><input type="checkbox" name="buddy_enabled" ${me.buddy_enabled ? 'checked' : ''}></span>
+      <span><b>เปิดให้คนอื่นเห็นและส่งคำขอจับคู่ได้</b><small>ปิดเมื่อไม่ต้องการหาบัดดี้ชั่วคราว</small></span>
+    </label>` : '<input type="hidden" name="buddy_enabled" value="1">'}
+    <div class="field">
+      <div class="row between"><label style="margin:0">1. คุณชอบเที่ยวแบบไหน? <span class="muted">(เลือกได้หลายอย่าง)</span></label><span class="small muted" data-chip-count></span></div>
+      <div class="interest-grid" data-chips>${allInterests.map((i) => `<button type="button" class="chip ${me.interests.includes(i) ? 'on' : ''}" data-i="${esc(i)}" aria-pressed="${me.interests.includes(i)}">${esc(i)}</button>`).join('')}</div>
+      <div class="add-row"><input data-new-interest placeholder="ไม่มีในรายการ? พิมพ์เพิ่ม เช่น ดำน้ำ"><button type="button" class="btn secondary sm" data-add-interest>เพิ่ม</button></div>
+    </div>
+    <div class="field"><label>2. สไตล์การเที่ยว</label>
+      <div class="seg-pills">${TRAVEL_STYLES.map((t) => `<label><input type="radio" name="travel_style" value="${t}" ${me.travel_style === t ? 'checked' : ''}><span>${t}</span></label>`).join('')}</div></div>
+    <details class="more-fields" ${me.age || me.gender || me.bio ? 'open' : ''}>
+      <summary>3. ข้อมูลเพิ่มเติม <span class="muted">(ไม่บังคับ แต่ช่วยให้จับคู่แม่นขึ้น)</span></summary>
+      <div class="grid grid-2">
+        <div class="field"><label>เพศ</label><select name="gender">${['', 'ชาย', 'หญิง', 'LGBTQ+', 'ไม่ระบุ'].map((g) => `<option ${me.gender === g ? 'selected' : ''} value="${g}">${g || 'เลือก'}</option>`).join('')}</select></div>
+        <div class="field"><label>อายุ</label><input type="number" name="age" min="18" max="99" value="${me.age || ''}" placeholder="เช่น 25"></div>
       </div>
-    </div>`;
+      <div class="field"><label>แนะนำตัวสั้น ๆ</label><textarea name="bio" maxlength="300" placeholder="เช่น ชอบเที่ยวคาเฟ่ ถ่ายรูป หาเพื่อนไปเชียงใหม่ช่วงปลายเดือน">${esc(me.bio || '')}</textarea></div>
+    </details>`;
+}
 
-  // โปรไฟล์
-  const f = document.getElementById('profile');
-  const chips = document.getElementById('chips');
+function bindProfileForm(f, me, onSaved) {
+  const interests = new Set(me.interests);
+  const chips = f.querySelector('[data-chips]');
+  const count = () => { f.querySelector('[data-chip-count]').textContent = `เลือกแล้ว ${interests.size}`; };
+  count();
+  f.querySelector('.switch-box input')?.addEventListener('change', (e) => f.querySelector('.switch-box').classList.toggle('on', e.target.checked));
   chips.addEventListener('click', (e) => {
     const c = e.target.closest('.chip');
     if (!c) return;
-    c.classList.toggle('on');
-    c.classList.contains('on') ? interests.add(c.dataset.i) : interests.delete(c.dataset.i);
+    const on = c.classList.toggle('on');
+    c.setAttribute('aria-pressed', on);
+    on ? interests.add(c.dataset.i) : interests.delete(c.dataset.i);
+    count();
   });
-  document.getElementById('add-interest').addEventListener('click', () => {
-    const inp = document.getElementById('new-interest');
+  const inp = f.querySelector('[data-new-interest]');
+  const add = () => {
     const v = inp.value.trim();
+    inp.value = '';
     if (!v || interests.has(v)) return;
     interests.add(v);
-    chips.insertAdjacentHTML('beforeend', `<button type="button" class="chip on" data-i="${esc(v)}">${esc(v)}</button>`);
-    inp.value = '';
-  });
+    const existing = [...chips.children].find((c) => c.dataset.i === v);
+    if (existing) { existing.classList.add('on'); existing.setAttribute('aria-pressed', true); }
+    else chips.insertAdjacentHTML('beforeend', `<button type="button" class="chip on" data-i="${esc(v)}" aria-pressed="true">${esc(v)}</button>`);
+    count();
+  };
+  f.querySelector('[data-add-interest]').addEventListener('click', add);
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     const d = formData(f);
+    if (d.buddy_enabled && !interests.size) return toast('กรุณาเลือกความสนใจอย่างน้อย 1 อย่าง', 'error');
     try {
-      state.user = await withButton(f.querySelector('button.btn.block'), () => api('PUT', '/buddy/profile', { ...d, buddy_enabled: !!d.buddy_enabled, interests: [...interests] }));
-      toast('บันทึกโปรไฟล์แล้ว', 'success');
-      buddyPage();
+      state.user = await withButton(f.querySelector('[type=submit]'), () => api('PUT', '/buddy/profile', { ...d, travel_style: d.travel_style || '', buddy_enabled: !!d.buddy_enabled, interests: [...interests] }));
+      buddyCache = null;
+      onSaved();
     } catch (err) { toast(err.message, 'error'); }
   });
+}
 
-  // ตอบรับ/ปฏิเสธ
+async function buddyPage(q = new URLSearchParams()) {
+  if (!requireLogin()) return;
+  loading();
+  const [me, matches] = await Promise.all([api('GET', '/buddy/profile'), api('GET', '/buddy/matches')]);
+
+  // ยังไม่ได้ตั้งค่า → แสดงหน้าเริ่มต้นใช้งานแบบง่าย ๆ หน้าเดียว
+  if (!me.buddy_enabled || !me.interests.length) {
+    $app.innerHTML = `
+      <form class="card onboard" id="onboard">
+        <div class="onboard-head">
+          <div class="onboard-ic">${ic('handshake', 32)}</div>
+          <h1>หาเพื่อนเที่ยวที่ใช่ ใน 1 นาที</h1>
+          <p class="muted">บอกเราว่าคุณชอบเที่ยวแบบไหน แล้ว AI จะหาคนที่ไปที่เดียวกัน ช่วงเวลาเดียวกัน และชอบอะไรคล้ายกันให้</p>
+        </div>
+        ${profileFields(me, { withToggle: false })}
+        <button type="submit" class="btn block lg">${ic('sparkles', 18)} เริ่มหาบัดดี้</button>
+        <p class="hint" style="text-align:center;margin-top:var(--space-3)">${ic('lock', 13)} ผู้ใช้อื่นจะเห็นเฉพาะชื่อ อายุ ความสนใจ และเมือง/วันที่ของทริปคุณ · ปิดได้ทุกเมื่อ</p>
+      </form>`;
+    bindProfileForm(document.getElementById('onboard'), me, () => { toast('พร้อมแล้ว! กำลังหาบัดดี้ให้คุณ', 'success'); buddyPage(); });
+    return;
+  }
+
+  const contacted = new Map([...matches.outgoing.map((m) => [m.other.id, 'sent']), ...matches.incoming.map((m) => [m.other.id, 'incoming']), ...matches.accepted.map((m) => [m.other.id, 'buddy'])]);
+  const people = [...matches.accepted.map((m) => ({ m, pending: false })), ...matches.outgoing.map((m) => ({ m, pending: true }))];
+
+  $app.innerHTML = `
+    <div class="page-head">
+      <div><h1>จับคู่บัดดี้ท่องเที่ยว</h1><p class="muted">ให้ AI แนะนำ หรือค้นหาเองตามเมืองและวันที่จะไป กดส่งคำขอ เมื่ออีกฝ่ายตอบรับก็แชทวางแผนทริปได้เลย</p></div>
+    </div>
+
+    <section class="agent-bar">
+      <div class="agent-ic">${ic('bot', 28)}</div>
+      <div class="grow">
+        <div class="agent-title"><b>AI Agent จับคู่บัดดี้</b><span class="agent-badge">${ic('sparkles', 12)} AI</span></div>
+        <div class="agent-basis">วิเคราะห์จาก: ${me.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}${me.travel_style ? `<span class="tag">${esc(me.travel_style)}</span>` : ''}<span class="tag">${ic('plane', 12)} ทริปที่จองไว้</span></div>
+      </div>
+      <div class="agent-actions">
+        <button class="btn secondary" id="edit-profile">${ic('pencil', 16)} แก้ไขโปรไฟล์</button>
+        <button class="btn agent-go" id="suggest">${ic('sparkles', 16)} ให้ AI หาบัดดี้ใหม่</button>
+      </div>
+    </section>
+
+    ${matches.incoming.length ? `
+    <section class="req-box" id="requests">
+      <h2>${ic('bell', 20)} มีคนอยากเป็นบัดดี้กับคุณ <span class="tab-count">${matches.incoming.length}</span></h2>
+      ${matches.incoming.map((m) => `
+        <div class="req-row">
+          ${avatar(m.other.name)}
+          <div class="grow">
+            <div class="row" style="gap:var(--space-2)"><b>${esc(m.other.name)}</b>${m.score != null ? `<span class="pct-pill ${compatLevel(m.score)}">เข้ากันได้ ${m.score}%</span>` : ''}</div>
+            <div class="small muted">${personMeta(m.other)}</div>
+            ${m.reason ? `<div class="small">${ic('bot', 14)} ${esc(m.reason)}</div>` : ''}
+          </div>
+          <div class="req-actions">
+            <button class="btn secondary sm" data-respond="${m.id}" data-accept="0">ปฏิเสธ</button>
+            <button class="btn sm" data-respond="${m.id}" data-accept="1">${ic('check', 15)} ตอบรับ</button>
+          </div>
+        </div>`).join('')}
+    </section>` : ''}
+
+    ${people.length ? `
+    <section class="section-block">
+      <h2 class="sec-title">บัดดี้ของฉัน</h2>
+      <div class="buddy-strip">${people.map(({ m, pending }) => pending
+        ? `<div class="bs-item pending" title="รอ ${esc(m.other.name)} ตอบรับ">${avatar(m.other.name)}<b>${esc(m.other.name)}</b><small>รอตอบรับ</small></div>`
+        : `<a class="bs-item" href="#/chat/${m.id}">${avatar(m.other.name)}<b>${esc(m.other.name)}</b><small>${ic('message-circle', 13)} แชท</small></a>`).join('')}</div>
+    </section>` : ''}
+
+    <section class="section-block">
+      <div class="find-head">
+        <h2 class="sec-title" style="margin:0">หาบัดดี้</h2>
+        <div class="mode-switch" role="tablist" aria-label="วิธีหาบัดดี้">
+          <button type="button" role="tab" data-mode="ai" title="AI เลือกคนที่เข้ากับคุณที่สุดให้">${ic('sparkles', 16)} AI แนะนำให้</button>
+          <button type="button" role="tab" data-mode="search" title="เลือกเมือง วันที่ และความสนใจเอง">${ic('search', 16)} ค้นหาเอง</button>
+        </div>
+      </div>
+      <div data-pane="ai"><div id="suggestions"></div></div>
+      <div data-pane="search" hidden>
+        <form class="card browse-filters" id="browse" autocomplete="off">
+          <div class="bf-row">
+            <label class="bf-field bf-q">${ic('search', 18)}<input name="q" placeholder="ค้นหาชื่อ หรือคำในแนะนำตัว เช่น ช่างภาพ"></label>
+            <label class="bf-field bf-city">${ic('map-pin', 18)}<select name="city"><option value="">ทุกเมืองปลายทาง</option></select></label>
+            <label class="bf-field"><small>ไปตั้งแต่</small><input type="date" name="from"></label>
+            <label class="bf-field"><small>ถึง</small><input type="date" name="to"></label>
+          </div>
+          <div class="bf-interests">
+            <span class="small muted">ความสนใจ:</span>
+            ${[...new Set([...me.interests, ...INTEREST_PRESETS])].map((i) => `<button type="button" class="chip" data-bi="${esc(i)}" aria-pressed="false">${esc(i)}</button>`).join('')}
+          </div>
+          <details class="bf-more">
+            <summary>ตัวกรองเพิ่มเติม (เพศ · อายุ · สไตล์)</summary>
+            <div class="bf-row">
+              <label class="bf-field"><small>เพศ</small><select name="gender"><option value="">ทุกเพศ</option>${['ชาย', 'หญิง', 'LGBTQ+', 'ไม่ระบุ'].map((g) => `<option>${g}</option>`).join('')}</select></label>
+              <label class="bf-field"><small>อายุตั้งแต่</small><input type="number" name="ageMin" min="18" max="99" placeholder="18"></label>
+              <label class="bf-field"><small>ถึง</small><input type="number" name="ageMax" min="18" max="99" placeholder="99"></label>
+              <label class="bf-field"><small>สไตล์การเที่ยว</small><select name="style"><option value="">ทุกสไตล์</option>${TRAVEL_STYLES.map((t) => `<option>${t}</option>`).join('')}</select></label>
+            </div>
+          </details>
+        </form>
+        <div class="row between bf-head">
+          <span id="browse-count" class="muted"></span>
+          <div class="row" style="gap:var(--space-2)">
+            <button type="button" class="btn ghost sm" id="browse-reset">ล้างตัวกรอง</button>
+            <select id="browse-sort" style="width:auto"><option value="score">เรียง: เข้ากันได้มากสุด</option><option value="trip">เรียง: ทริปใกล้ที่สุด</option><option value="name">เรียง: ชื่อ ก–ฮ</option></select>
+          </div>
+        </div>
+        <div id="browse-results"></div>
+      </div>
+    </section>`;
+
+  document.getElementById('edit-profile').addEventListener('click', () => {
+    const m = modal(`<h2>โปรไฟล์ของฉัน</h2><form id="pf">${profileFields(me)}
+      <div class="row" style="justify-content:flex-end;margin-top:var(--space-4)"><button type="button" class="btn secondary" data-close>ยกเลิก</button><button type="submit" class="btn">บันทึก</button></div></form>`, { wide: true });
+    bindProfileForm(m.el.querySelector('#pf'), me, () => { m.close(); toast('บันทึกโปรไฟล์แล้ว', 'success'); buddyPage(); });
+  });
+
   $app.querySelectorAll('[data-respond]').forEach((btn) => btn.addEventListener('click', async () => {
     const accept = btn.dataset.accept === '1';
     try {
@@ -1025,46 +1347,124 @@ async function buddyPage() {
       accept ? go(`#/chat/${btn.dataset.respond}`) : buddyPage();
     } catch (err) { toast(err.message, 'error'); }
   }));
+  if (q.get('tab') === 'requests') document.getElementById('requests')?.scrollIntoView({ behavior: 'smooth' });
 
-  // AI Agent
-  document.getElementById('suggest').addEventListener('click', async (e) => {
+  const chatOf = new Map(matches.accepted.map((m) => [m.other.id, m.id]));
+  const card = (x, mine, why = 'ทำไม AI ถึงแนะนำคนนี้?') => {
+    const u = x.user, common = u.interests.filter((i) => mine.has(i)), status = contacted.get(u.id);
+    return `
+      <article class="sg-card">
+        <div class="sg-top">${avatar(u.name)}<div class="sg-pct ${compatLevel(x.score)}"><b>${x.score}%</b><small>${compatLabel(x.score)}</small></div></div>
+        <div><b class="sg-name">${esc(u.name)}</b><div class="small muted">${personMeta(u) || '&nbsp;'}</div></div>
+        <ul class="sg-facts">
+          <li>${ic('heart', 15)} <span>${common.length ? `ชอบ${common.map(esc).join(', ')}เหมือนคุณ` : '<span class="muted">ความสนใจไม่ตรงกัน</span>'}</span></li>
+          <li>${ic('plane', 15)} <span>${x.trips.length ? x.trips.map(tripText).join('<br>') : '<span class="muted">ยังไม่มีทริปที่จองไว้</span>'}</span></li>
+        </ul>
+        <details class="sg-more">
+          <summary>${why}</summary>
+          <p>${ic('bot', 14)} ${esc(x.reason)}</p>
+          ${u.bio ? `<p class="match-bio">“${esc(u.bio)}”</p>` : ''}
+          <div>${u.interests.map((i) => `<span class="tag ${mine.has(i) ? '' : 'muted-tag'}">${esc(i)}</span>`).join('')}</div>
+          <button class="linklike small report-link" data-report="${u.id}" data-name="${esc(u.name)}">${ic('flag', 13)} รายงานผู้ใช้นี้</button>
+        </details>
+        ${status === 'buddy' ? `<a class="btn secondary block" href="#/chat/${chatOf.get(u.id)}">${ic('message-circle', 16)} เป็นบัดดี้แล้ว · แชท</a>`
+          : status === 'incoming' ? `<a class="btn block" href="#/buddy?tab=requests" data-scroll-req>${ic('bell', 16)} เขาส่งคำขอมาแล้ว</a>`
+          : status === 'sent' ? `<button class="btn block" disabled>${ic('check', 16)} ส่งคำขอแล้ว · รอตอบรับ</button>`
+          : `<button class="btn block" data-req="${u.id}" data-score="${x.score}" data-reason="${esc(x.reason)}">${ic('handshake', 16)} ส่งคำขอจับคู่</button>`}
+      </article>`;
+  };
+  const bindCards = ($root) => {
+    $root.querySelectorAll('[data-req]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        await withButton(b, () => api('POST', '/buddy/request', { userId: Number(b.dataset.req), score: Number(b.dataset.score), reason: b.dataset.reason }));
+        b.innerHTML = `${ic('check', 16)} ส่งคำขอแล้ว · รอตอบรับ`; b.disabled = true;
+        contacted.set(Number(b.dataset.req), 'sent');
+        toast('ส่งคำขอแล้ว เราจะแจ้งเตือนเมื่ออีกฝ่ายตอบรับ', 'success');
+      } catch (err) { toast(err.message, 'error'); }
+    }));
+    $root.querySelectorAll('[data-scroll-req]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.getElementById('requests')?.scrollIntoView({ behavior: 'smooth' }); }));
+    $root.querySelectorAll('[data-report]').forEach((b) => b.addEventListener('click', () => reportModal(Number(b.dataset.report), b.dataset.name, () => { buddyCache = null; buddyPage(); })));
+  };
+
+  const renderSuggestions = (r) => {
     const $s = document.getElementById('suggestions');
-    $s.innerHTML = `<div class="card loading"><div class="spinner"></div>AI Agent กำลังวิเคราะห์โปรไฟล์และทริปของคุณ...</div>`;
+    const mine = new Set(r.me.interests);
+    const all = r.suggestions.filter((x) => contacted.get(x.user.id) !== 'buddy');
+    // คนที่ไม่มีจุดร่วมเลย (0%) ซ่อนไว้ก่อน ให้เห็นเฉพาะคนที่น่าสนใจจริง ๆ
+    const top = all.filter((x) => x.score > 0), low = all.filter((x) => x.score <= 0);
+    $s.innerHTML = `
+      ${!r.me.trips.length ? `<div class="alert info small">${ic('info', 15)} ยังไม่มีทริปที่จองไว้ ผลจึงอิงจากความสนใจเป็นหลัก — <a href="#/search">จองโรงแรม</a> เพื่อเจอคนที่ไปช่วงเดียวกัน</div>` : ''}
+      ${top.length ? `<div class="sg-grid">${top.map((x) => card(x, mine)).join('')}</div>`
+        : `<div class="card empty slim"><div class="icon">${ic('search-x', 32)}</div><b>ยังไม่เจอคนที่มีจุดร่วมกับคุณ</b><p class="muted small">ลองเลือกความสนใจเพิ่ม หรือจองทริปเพื่อเจอคนที่ไปช่วงเดียวกัน</p><button class="btn secondary sm" data-edit>${ic('pencil', 15)} แก้ไขความสนใจ</button></div>`}
+      ${low.length ? `<div class="show-more"><button class="btn ghost sm" id="show-low">แสดงคนอื่นที่ยังไม่มีจุดร่วม (${low.length} คน)</button></div><div class="sg-grid" id="low-list" hidden>${low.map((x) => card(x, mine)).join('')}</div>` : ''}
+      <p class="engine-note">${r.engine === 'claude' ? `${ic('sparkles', 13)} วิเคราะห์โดย Claude AI` : `${ic('list-checks', 13)} วิเคราะห์ด้วยกฎภายในระบบ`} จากความสนใจ สไตล์การเที่ยว และทริปที่จองไว้</p>`;
+    document.getElementById('show-low')?.addEventListener('click', (e) => { document.getElementById('low-list').hidden = false; e.target.closest('.show-more').remove(); });
+    $s.querySelector('[data-edit]')?.addEventListener('click', () => document.getElementById('edit-profile').click());
+    bindCards($s);
+  };
+  const runSuggest = async () => {
+    const $s = document.getElementById('suggestions');
+    $s.innerHTML = `<div class="card loading"><div class="spinner"></div>AI Agent กำลังวิเคราะห์ความสนใจและทริปของคุณ...</div>`;
     try {
-      const r = await withButton(e.target, () => api('POST', '/buddy/suggest'));
-      const scoreRing = (s) => `<div class="score" style="background:conic-gradient(var(--primary) ${s * 3.6}deg, var(--surface-2) 0)"><div style="position:absolute;inset:6px;background:var(--surface);border-radius:50%"></div><span>${s}<small>คะแนน</small></span></div>`;
-      $s.innerHTML = `<div class="card">
-        <div class="row between"><h3>บัดดี้ที่แนะนำสำหรับคุณ</h3><span class="pill">${r.engine === 'claude' ? `${ic('sparkles', 14)} วิเคราะห์โดย Claude AI` : `${ic('list-checks', 14)} วิเคราะห์ด้วยกฎภายในระบบ`}</span></div>
-        ${!r.me.trips.length ? `<div class="alert info small">คุณยังไม่มีทริปที่จองไว้ ผลการจับคู่จะอิงจากความสนใจเป็นหลัก — <a href="#/search">จองโรงแรม</a> เพื่อให้จับคู่ได้แม่นยำขึ้น</div>` : ''}
-        ${r.suggestions.length ? r.suggestions.map((s) => `
-          <div class="buddy-card" style="padding-top:14px;border-top:1px solid var(--border)">
-            ${avatar(s.user.name)}
-            <div>
-              <b>${esc(s.user.name)}</b> <span class="muted small">${s.user.age ? s.user.age + ' ปี' : ''} ${esc(s.user.gender || '')} ${s.user.travel_style ? '· ' + esc(s.user.travel_style) : ''}</span>
-              <div class="small">${esc(s.user.bio || '')}</div>
-              <div>${s.user.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>
-              ${s.trips.length ? `<div class="small muted">${ic('plane', 14)} ${s.trips.map((t) => `${esc(t.city)} ${fmtDate(t.check_in)}–${fmtDate(t.check_out)}`).join(' · ')}</div>` : ''}
-              <div class="ai-reason">${ic('bot', 15)} ${esc(s.reason)}</div>
-              <div class="row" style="margin-top:10px">
-                <button class="btn sm" data-req="${s.user.id}" data-score="${s.score}" data-reason="${esc(s.reason)}">${ic('handshake', 15)} ส่งคำขอจับคู่</button>
-                <button class="btn ghost sm" data-report="${s.user.id}" data-name="${esc(s.user.name)}">${ic('flag', 15)} รายงาน</button>
-              </div>
-            </div>
-            ${scoreRing(s.score)}
-          </div>`).join('') : '<p class="muted">ยังไม่พบผู้ใช้ที่เหมาะสมในตอนนี้ ลองเพิ่มความสนใจหรือจองทริปเพิ่ม</p>'}
-      </div>`;
-      $s.querySelectorAll('[data-req]').forEach((b) => b.addEventListener('click', async () => {
-        try {
-          await withButton(b, () => api('POST', '/buddy/request', { userId: Number(b.dataset.req), score: Number(b.dataset.score), reason: b.dataset.reason }));
-          b.innerHTML = `${ic('check', 15)} ส่งคำขอแล้ว`; b.disabled = true;
-          toast('ส่งคำขอจับคู่แล้ว รอการตอบรับ', 'success');
-        } catch (err) { toast(err.message, 'error'); }
-      }));
-      $s.querySelectorAll('[data-report]').forEach((b) => b.addEventListener('click', () => reportModal(Number(b.dataset.report), b.dataset.name, () => buddyPage())));
-    } catch (err) {
-      $s.innerHTML = `<div class="alert error">${esc(err.message)}</div>`;
-    }
+      buddyCache = await withButton(document.getElementById('suggest'), () => api('POST', '/buddy/suggest'));
+      renderSuggestions(buddyCache);
+    } catch (err) { $s.innerHTML = `<div class="alert error">${esc(err.message)}</div>`; }
+  };
+
+  // ---------- ค้นหาเอง ----------
+  const bf = document.getElementById('browse'), $res = document.getElementById('browse-results');
+  const picked = new Set();
+  let browseTimer, browseSeq = 0, browseLoaded = false;
+  const runBrowse = async () => {
+    const seq = ++browseSeq;
+    const d = formData(bf);
+    const params = new URLSearchParams({ ...Object.fromEntries(Object.entries(d).filter(([, v]) => v)), sort: document.getElementById('browse-sort').value });
+    if (picked.size) params.set('interests', [...picked].join(','));
+    $res.innerHTML = `<div class="card loading"><div class="spinner"></div>กำลังค้นหา...</div>`;
+    try {
+      const r = await api('GET', `/buddy/browse?${params}`);
+      if (seq !== browseSeq) return; // มีการค้นหาใหม่กว่าแล้ว
+      const mine = new Set(r.me.interests);
+      document.getElementById('browse-count').innerHTML = `พบ <b>${r.total}</b> คน`;
+      $res.innerHTML = r.results.length
+        ? `<div class="sg-grid">${r.results.map((x) => card(x, mine, 'ดูโปรไฟล์และจุดร่วม')).join('')}</div>`
+        : `<div class="card empty slim"><div class="icon">${ic('search-x', 32)}</div><b>ไม่พบคนที่ตรงกับตัวกรอง</b><p class="muted small">ลองเลือกเมืองหรือช่วงวันที่ให้กว้างขึ้น หรือลดความสนใจที่เลือก</p></div>`;
+      bindCards($res);
+      browseLoaded = true;
+    } catch (err) { $res.innerHTML = `<div class="alert error">${esc(err.message)}</div>`; }
+  };
+  const queueBrowse = (ms = 300) => { clearTimeout(browseTimer); browseTimer = setTimeout(runBrowse, ms); };
+  bf.addEventListener('input', () => queueBrowse());
+  bf.addEventListener('change', () => queueBrowse(0));
+  bf.addEventListener('submit', (e) => { e.preventDefault(); queueBrowse(0); });
+  document.getElementById('browse-sort').addEventListener('change', () => queueBrowse(0));
+  bf.querySelector('.bf-interests').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-bi]');
+    if (!c) return;
+    const on = c.classList.toggle('on');
+    c.setAttribute('aria-pressed', on);
+    on ? picked.add(c.dataset.bi) : picked.delete(c.dataset.bi);
+    queueBrowse(0);
   });
+  document.getElementById('browse-reset').addEventListener('click', () => {
+    bf.reset(); picked.clear();
+    bf.querySelectorAll('[data-bi].on').forEach((c) => { c.classList.remove('on'); c.setAttribute('aria-pressed', false); });
+    queueBrowse(0);
+  });
+  api('GET', '/buddy/cities').then((cities) => {
+    bf.city.insertAdjacentHTML('beforeend', cities.map((c) => `<option>${esc(c)}</option>`).join(''));
+  }).catch(() => {});
+
+  const setMode = (mode, autoload = true) => {
+    $app.querySelectorAll('[data-mode]').forEach((b) => { b.classList.toggle('active', b.dataset.mode === mode); b.setAttribute('aria-selected', b.dataset.mode === mode); });
+    $app.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== mode; });
+    history.replaceState(null, '', mode === 'search' ? '#/buddy?mode=search' : '#/buddy');
+    if (autoload && mode === 'search' && !browseLoaded) runBrowse();
+    if (autoload && mode === 'ai' && !document.getElementById('suggestions').innerHTML) buddyCache ? renderSuggestions(buddyCache) : runSuggest();
+  };
+  $app.querySelector('.mode-switch').addEventListener('click', (e) => { const b = e.target.closest('[data-mode]'); if (b) setMode(b.dataset.mode); });
+  document.getElementById('suggest').addEventListener('click', () => { setMode('ai', false); runSuggest(); });
+  setMode(q.get('mode') === 'search' ? 'search' : 'ai');
 }
 
 function reportModal(userId, name, after) {
@@ -1180,7 +1580,7 @@ async function adminPage(q) {
       <div class="card stat"><div class="small muted">รอเช็คอิน / พักอยู่</div><div class="num">${count('confirmed')} / ${count('checked_in')}</div></div>
       <div class="card stat"><div class="small muted">รายงานที่รอตรวจสอบ</div><div class="num" style="color:${stats.openReports ? 'var(--danger)' : ''}">${stats.openReports}</div></div>
     </div>
-    <div class="card" style="margin-top:16px">
+    <div class="card">
       <div class="row between"><h2>การจองทั้งหมด</h2>
         <select id="st" style="width:auto">${[['', 'ทุกสถานะ'], ...Object.entries(STATUS)].map(([k, l]) => `<option value="${k}" ${k === status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="table-wrap"><table>
@@ -1248,7 +1648,8 @@ async function router() {
       case 'pay': return await payPage(seg[1]);
       case 'booking': return await bookingPage(seg[1]);
       case 'bookings': return await bookingsPage(q);
-      case 'buddy': return await buddyPage();
+      case 'voucher': return await voucherPage(seg[1]);
+      case 'buddy': return await buddyPage(q);
       case 'chat': return await chatPage(seg[1]);
       case 'notifications': return await notificationsPage();
       case 'admin': return await adminPage(q);

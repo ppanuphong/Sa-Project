@@ -3,6 +3,7 @@
 //   4242 4242 4242 4242  → ชำระสำเร็จ
 //   4000 0000 0000 0002  → บัตรถูกปฏิเสธ
 //   4000 0000 0000 9995  → ยอดเงินไม่เพียงพอ
+// TrueMoney ทดสอบ: เบอร์ใดก็ได้ 10 หลักขึ้นต้นด้วย 0 → สำเร็จ, ลงท้าย 0000 → ยอดเงินใน Wallet ไม่พอ
 import { randomBytes } from 'node:crypto';
 
 const ref = (prefix) => `${prefix}-${Date.now().toString(36).toUpperCase()}${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -38,6 +39,15 @@ export async function chargeCard({ amount, card }) {
   if (number.endsWith('0002')) return { status: 'failed', message: 'ธนาคารปฏิเสธการทำรายการ' };
   if (number.endsWith('9995')) return { status: 'failed', message: 'ยอดเงินในบัญชีไม่เพียงพอ' };
   return { status: 'success', transactionRef: ref('TXN'), message: `ตัดบัตรลงท้าย ${number.slice(-4)} สำเร็จ`, amount };
+}
+
+/** ตัดเงินจาก TrueMoney Wallet (จำลอง) */
+export async function chargeTrueMoney({ amount, phone }) {
+  await delay(600);
+  const num = String(phone || '').replace(/\D/g, '');
+  if (!/^0\d{9}$/.test(num)) return { status: 'failed', message: 'เบอร์โทรศัพท์ TrueMoney ไม่ถูกต้อง' };
+  if (num.endsWith('0000')) return { status: 'failed', message: 'ยอดเงินใน TrueMoney Wallet ไม่เพียงพอ' };
+  return { status: 'success', transactionRef: ref('TMW'), message: `ชำระผ่าน TrueMoney Wallet ${num.slice(0, 3)}-xxx-${num.slice(-4)} สำเร็จ`, amount };
 }
 
 /** สร้างรายการ QR พร้อมเพย์ (จำลอง) */
