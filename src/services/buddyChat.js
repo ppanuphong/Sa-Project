@@ -1,13 +1,16 @@
 // บัดดี้ตัวอย่างตอบแชทอัตโนมัติ — ให้ทดสอบฟีเจอร์แชทได้ด้วยบัญชีเดียว
 // ถ้าตั้งค่า ANTHROPIC_API_KEY ไว้ ให้ Claude สวมบทบาทบัดดี้ตามโปรไฟล์และทริปของเขา
 // ถ้าไม่ได้ตั้งค่า หรือเรียกไม่สำเร็จ จะตอบด้วยกฎ (จับคำสำคัญในข้อความ) แทนเสมอ
+// ไม่ใช้ setTimeout: บันทึกเวลาที่จะตอบไว้ในฐานข้อมูล แล้วส่งคำตอบตอนหน้าแชทดึงข้อความครั้งถัดไป
+// (ทำงานได้บน serverless ที่หยุดทำงานทันทีหลังตอบ request)
 import { db, parseJSON } from '../db.js';
 import { notify } from './notificationService.js';
 import { claudeEnabled, getClient, tripsOf } from './buddyAgent.js';
 
-const typing = new Map(); // match_id → timer ของคำตอบที่กำลังจะส่ง
+const STUCK_MS = 60000; // คำตอบที่เริ่มสร้างแล้วค้างเกินนี้ (เช่น instance ดับกลางทาง) ให้ลองใหม่
 
-export const isTyping = (matchId) => typing.has(Number(matchId));
+export const isTyping = (matchId) =>
+  db.prepare('SELECT reply_due FROM buddy_matches WHERE id = ?').get(matchId)?.reply_due != null;
 
 const userOf = (id) => db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 const fmt = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
@@ -118,43 +121,50 @@ async function generateReply(bot, me, history) {
   return localReply(bot, me, history);
 }
 
-/** หลังผู้ใช้ส่งข้อความ: ถ้าอีกฝ่ายเป็นบัดดี้ตัวอย่าง ให้ตอบกลับหลังหน่วงเวลาสักครู่ (ส่งรัว ๆ จะตอบรวมครั้งเดียว) */
+/** หลังผู้ใช้ส่งข้อความ: ถ้าอีกฝ่ายเป็นบัดดี้ตัวอย่าง ตั้งเวลาตอบอีกสักครู่ (ส่งรัว ๆ จะเลื่อนเวลาและตอบรวมครั้งเดียว) */
 export function scheduleReply(match, senderId) {
   const botId = match.requester_id === senderId ? match.target_id : match.requester_id;
-  const bot = userOf(botId), me = userOf(senderId);
-  if (!bot?.auto_reply || me?.auto_reply) return;
-  clearTimeout(typing.get(match.id));
-  typing.set(match.id, setTimeout(async () => {
-    try {
-      const still = db.prepare("SELECT 1 FROM buddy_matches WHERE id = ? AND status = 'accepted'").get(match.id);
-      if (!still) return;
-      const history = db.prepare('SELECT sender_id, text FROM messages WHERE match_id = ? ORDER BY id').all(match.id);
-      const text = await generateReply(bot, me, history);
-      db.prepare('INSERT INTO messages (match_id, sender_id, text) VALUES (?,?,?)').run(match.id, bot.id, text);
-    } catch (err) {
-      console.warn('⚠️  บัดดี้ตัวอย่างตอบแชทไม่สำเร็จ:', err.message);
-    } finally {
-      typing.delete(match.id);
-    }
-  }, 1500 + Math.random() * 1500));
+  if (!userOf(botId)?.auto_reply || userOf(senderId)?.auto_reply) return;
+  db.prepare('UPDATE buddy_matches SET reply_due = ? WHERE id = ?').run(Date.now() + 1500 + Math.round(Math.random() * 1500), match.id);
 }
 
-/** คำขอจับคู่ที่ส่งถึงบัดดี้ตัวอย่าง: ตอบรับอัตโนมัติพร้อมทักทาย */
-export function autoAcceptRequest(matchId, delay = 2500) {
-  setTimeout(() => {
-    const m = db.prepare("SELECT * FROM buddy_matches WHERE id = ? AND status = 'pending'").get(matchId);
-    if (!m) return;
-    const bot = userOf(m.target_id), me = userOf(m.requester_id);
-    if (!bot?.auto_reply || me?.auto_reply) return;
-    db.prepare("UPDATE buddy_matches SET status = 'accepted', responded_at = datetime('now') WHERE id = ?").run(m.id);
-    db.prepare('INSERT INTO messages (match_id, sender_id, text) VALUES (?,?,?)').run(m.id, bot.id, localReply(bot, me, [{ sender_id: me.id, text: 'สวัสดี' }]));
-    notify(me.id, { title: 'จับคู่บัดดี้สำเร็จ', message: `${bot.name} ตอบรับเป็นบัดดี้แล้ว เริ่มแชทกันได้เลย`, link: `#/chat/${m.id}` });
-  }, delay);
+/** ถึงเวลาแล้วก็สร้างคำตอบและบันทึก — เรียกก่อนดึงข้อความ */
+export async function deliverDueReply(matchId) {
+  const now = Date.now();
+  // จองงานแบบ atomic กันไม่ให้สอง request ตอบซ้ำ
+  const claimed = db.prepare(`UPDATE buddy_matches SET reply_due = ? WHERE id = ? AND status = 'accepted'
+    AND ((reply_due > 0 AND reply_due <= ?) OR (reply_due < 0 AND -reply_due < ?))`).run(-now, matchId, now, now - STUCK_MS).changes;
+  if (!claimed) return;
+  try {
+    const m = db.prepare('SELECT * FROM buddy_matches WHERE id = ?').get(matchId);
+    const a = userOf(m.requester_id), b = userOf(m.target_id);
+    const [bot, me] = a.auto_reply ? [a, b] : [b, a];
+    const history = db.prepare('SELECT sender_id, text FROM messages WHERE match_id = ? ORDER BY id').all(m.id);
+    const text = await generateReply(bot, me, history);
+    db.prepare('INSERT INTO messages (match_id, sender_id, text) VALUES (?,?,?)').run(m.id, bot.id, text);
+  } catch (err) {
+    console.warn('⚠️  บัดดี้ตัวอย่างตอบแชทไม่สำเร็จ:', err.message);
+  } finally {
+    // ถ้าระหว่างสร้างคำตอบผู้ใช้ส่งข้อความใหม่มา (reply_due เปลี่ยนแล้ว) ให้คงคิวใหม่ไว้
+    db.prepare('UPDATE buddy_matches SET reply_due = NULL WHERE id = ? AND reply_due = ?').run(matchId, -now);
+  }
+}
+
+/** คำขอจับคู่ที่ส่งถึงบัดดี้ตัวอย่าง: ตอบรับทันทีพร้อมทักทาย คืนค่า true ถ้าตอบรับ */
+export function autoAcceptRequest(matchId) {
+  const m = db.prepare("SELECT * FROM buddy_matches WHERE id = ? AND status = 'pending'").get(matchId);
+  if (!m) return false;
+  const bot = userOf(m.target_id), me = userOf(m.requester_id);
+  if (!bot?.auto_reply || me?.auto_reply) return false;
+  db.prepare("UPDATE buddy_matches SET status = 'accepted', responded_at = datetime('now') WHERE id = ?").run(m.id);
+  db.prepare('INSERT INTO messages (match_id, sender_id, text) VALUES (?,?,?)').run(m.id, bot.id, localReply(bot, me, [{ sender_id: me.id, text: 'สวัสดี' }]));
+  notify(me.id, { title: 'จับคู่บัดดี้สำเร็จ', message: `${bot.name} ตอบรับเป็นบัดดี้แล้ว เริ่มแชทกันได้เลย`, link: `#/chat/${m.id}` });
+  return true;
 }
 
 // ตอนเปิดเซิร์ฟเวอร์: คำขอที่ค้างอยู่กับบัดดี้ตัวอย่างให้ตอบรับเลย
 export function acceptPendingSampleRequests() {
   db.prepare(`SELECT m.id FROM buddy_matches m JOIN users t ON t.id = m.target_id JOIN users r ON r.id = m.requester_id
     WHERE m.status = 'pending' AND t.auto_reply = 1 AND r.auto_reply = 0`).all()
-    .forEach((m, i) => autoAcceptRequest(m.id, 1000 + i * 200));
+    .forEach((m) => autoAcceptRequest(m.id));
 }

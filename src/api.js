@@ -5,7 +5,7 @@ import { createSession, destroySession, publicUser } from './auth.js';
 import * as gateway from './services/paymentGateway.js';
 import { notify } from './services/notificationService.js';
 import { suggestBuddies, browseBuddies } from './services/buddyAgent.js';
-import { scheduleReply, autoAcceptRequest, acceptPendingSampleRequests, isTyping } from './services/buddyChat.js';
+import { scheduleReply, deliverDueReply, autoAcceptRequest, acceptPendingSampleRequests, isTyping } from './services/buddyChat.js';
 
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -499,8 +499,9 @@ route('POST', '/api/buddy/request', ({ body, user }) => {
   if (exists) fail(409, 'มีคำขอจับคู่กับผู้ใช้นี้อยู่แล้ว');
   const r = db.prepare('INSERT INTO buddy_matches (requester_id, target_id, score, reason) VALUES (?,?,?,?)')
     .run(user.id, target.id, int(body.score, null), String(body.reason || '').slice(0, 300));
-  if (target.auto_reply) autoAcceptRequest(Number(r.lastInsertRowid));
-  else notify(target.id, { title: 'มีคำขอจับคู่บัดดี้ใหม่', message: `${user.name} อยากเป็นบัดดี้ท่องเที่ยวกับคุณ`, link: '#/buddy?tab=requests' });
+  const matchId = Number(r.lastInsertRowid);
+  if (target.auto_reply && autoAcceptRequest(matchId)) return { ok: true, accepted: true, matchId, name: target.name };
+  notify(target.id, { title: 'มีคำขอจับคู่บัดดี้ใหม่', message: `${user.name} อยากเป็นบัดดี้ท่องเที่ยวกับคุณ`, link: '#/buddy?tab=requests' });
   return { ok: true };
 });
 
@@ -524,8 +525,9 @@ function acceptedMatch(id, user) {
   return m;
 }
 
-route('GET', '/api/buddy/matches/:id/messages', ({ params, query, user }) => {
+route('GET', '/api/buddy/matches/:id/messages', async ({ params, query, user }) => {
   const m = acceptedMatch(params.id, user);
+  await deliverDueReply(m.id);
   return {
     match: matchView(m, user.id),
     messages: db.prepare('SELECT * FROM messages WHERE match_id = ? AND id > ? ORDER BY id').all(m.id, int(query.after, 0)),

@@ -1431,7 +1431,16 @@ async function buddyPage(q = new URLSearchParams()) {
   const bindCards = ($root) => {
     $root.querySelectorAll('[data-req]').forEach((b) => b.addEventListener('click', async () => {
       try {
-        await withButton(b, () => api('POST', '/buddy/request', { userId: Number(b.dataset.req), score: Number(b.dataset.score), reason: b.dataset.reason }));
+        const r = await withButton(b, () => api('POST', '/buddy/request', { userId: Number(b.dataset.req), score: Number(b.dataset.score), reason: b.dataset.reason }));
+        if (r.accepted) {
+          // บัดดี้ตัวอย่างตอบรับทันที
+          b.outerHTML = `<a class="btn secondary block" href="#/chat/${r.matchId}">${ic('message-circle', 16)} เป็นบัดดี้แล้ว · แชท</a>`;
+          contacted.set(Number(b.dataset.req), 'buddy');
+          buddyCache = null;
+          toast(`${r.name} ตอบรับเป็นบัดดี้แล้ว เริ่มแชทได้เลย`, 'success');
+          refreshUnread();
+          return;
+        }
         b.innerHTML = `${ic('check', 16)} ส่งคำขอแล้ว · รอตอบรับ`; b.disabled = true;
         contacted.set(Number(b.dataset.req), 'sent');
         toast('ส่งคำขอแล้ว เราจะแจ้งเตือนเมื่ออีกฝ่ายตอบรับ', 'success');

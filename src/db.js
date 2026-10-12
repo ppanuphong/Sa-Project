@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { hashPassword } from './password.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.DB_PATH || join(here, '..', 'data', 'app.db');
+// บน Vercel เขียนไฟล์ได้เฉพาะ /tmp (ข้อมูลจะกลับเป็นข้อมูลตัวอย่างเมื่อ instance ถูกสร้างใหม่)
+const DB_PATH = process.env.DB_PATH || (process.env.VERCEL ? '/tmp/app.db' : join(here, '..', 'data', 'app.db'));
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 export const db = new DatabaseSync(DB_PATH);
@@ -156,6 +157,9 @@ if (!hotelCols.includes('star_class')) db.exec('ALTER TABLE hotels ADD COLUMN st
 // ---------- migration: บัดดี้ตัวอย่างที่ตอบแชทอัตโนมัติ ----------
 const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
 if (!userCols.includes('auto_reply')) db.exec('ALTER TABLE users ADD COLUMN auto_reply INTEGER NOT NULL DEFAULT 0');
+// เวลา (ms) ที่บัดดี้ตัวอย่างจะตอบแชท: > 0 = รอตอบ, < 0 = กำลังสร้างคำตอบ (เก็บเวลาที่เริ่ม), NULL = ไม่มี
+const matchCols = db.prepare('PRAGMA table_info(buddy_matches)').all().map((c) => c.name);
+if (!matchCols.includes('reply_due')) db.exec('ALTER TABLE buddy_matches ADD COLUMN reply_due INTEGER');
 const SAMPLE_BUDDIES = ['mali', 'somchai', 'nok', 'ploy', 'ton', 'fah', 'bank', 'mint', 'pete', 'jane'];
 function markSampleBuddies() {
   db.prepare(`UPDATE users SET auto_reply = 1 WHERE role = 'customer' AND username IN (${SAMPLE_BUDDIES.map(() => '?').join(',')})`)
