@@ -910,3 +910,112 @@ hr { margin: var(--space-5) 0; }
   .bf-city { grid-column: span 2; }
   .bf-head { flex-wrap: wrap; }
 }
+
+/* ---------- Admin ---------- */
+:root { --admin-side: #17233a; --admin-side-text: #c3cee0; --bar-past: #bcd0f3; }
+body.admin-mode main.container { max-width: none; padding: 0; }
+body.admin-mode .site-footer { display: none; }
+.admin-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: calc(100vh - 64px); }
+.admin-side { background: var(--admin-side); color: var(--admin-side-text); padding: var(--space-5) var(--space-3); position: sticky; top: 64px; height: calc(100vh - 64px); overflow-y: auto; }
+.admin-side-label { font-size: .8rem; letter-spacing: .04em; opacity: .7; padding: 0 var(--space-3) var(--space-3); }
+.admin-side nav { display: flex; flex-direction: column; gap: 4px; }
+.admin-side a { display: flex; align-items: center; gap: var(--space-3); padding: 11px var(--space-3); border-radius: 10px; color: var(--admin-side-text); font-weight: 500; }
+.admin-side a:hover { background: rgba(255, 255, 255, .07); color: #fff; text-decoration: none; }
+.admin-side a.active { background: var(--primary); color: #fff; }
+.admin-side a span { flex: 1; }
+.admin-badge { background: #f97352; color: #fff; font-size: .75rem; min-width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; padding: 0 6px; }
+.admin-main { padding: var(--space-5) var(--space-6) var(--space-6); min-width: 0; }
+.admin-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); margin-bottom: var(--gap); flex-wrap: wrap; }
+.admin-head h1 { margin: 0; }
+.admin-me { display: flex; align-items: center; gap: var(--space-3); }
+.admin-me .avatar { width: 46px; height: 46px; font-size: 1.1rem; }
+
+.kpis { margin-bottom: var(--gap); }
+a.card.kpi { color: inherit; transition: border-color .15s; }
+a.card.kpi:hover { text-decoration: none; border-color: var(--primary); }
+.kpi-label { color: var(--muted); font-size: .92rem; }
+.kpi-num { font-size: 2rem; font-weight: 700; line-height: 1.2; margin: var(--space-2) 0; font-variant-numeric: tabular-nums; }
+.kpi-sub { font-size: .88rem; }
+.kpi-sub .up { color: var(--success); }
+.kpi-sub .down { color: var(--danger); }
+.kpi-sub .ic { vertical-align: -2px; }
+
+.admin-split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.mini-stats { margin-top: var(--gap); }
+.mini-stats a.card { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); padding: var(--pad-sm) var(--pad); }
+.mini-stats a.card:hover { text-decoration: none; border-color: var(--primary); }
+.mini-stats b { display: block; color: var(--text); font-size: 1.3rem; line-height: 1.2; }
+.mini-stats span { font-size: .86rem; }
+
+/* แผนภูมิแท่ง (ซีรีส์เดียว — วันนี้สีเข้ม วันก่อนหน้าสีอ่อน) */
+.bars { position: relative; height: 260px; margin-top: var(--space-5); padding-left: 32px; }
+.bars-grid { position: absolute; inset: 0 0 28px 32px; display: flex; flex-direction: column; justify-content: space-between; }
+.bars-grid div { border-top: 1px solid var(--border); position: relative; height: 0; }
+.bars-grid div:last-child { border-top-color: #b8c0cc; }
+.bars-grid span { position: absolute; left: -32px; top: -9px; width: 24px; text-align: right; font-size: .75rem; color: var(--muted); }
+.bars-cols { position: absolute; inset: 0 0 0 32px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.bar-col { display: flex; flex-direction: column; align-items: stretch; position: relative; outline: none; }
+.bar-track { flex: 1; display: flex; align-items: flex-end; padding: 0 14%; }
+.bar { width: 100%; background: var(--bar-past); border-radius: 4px 4px 0 0; position: relative; min-height: 2px; transition: background .15s; }
+.bar span { position: absolute; top: -22px; left: 0; right: 0; text-align: center; font-size: .82rem; font-weight: 700; color: var(--text); }
+.bar-col.is-today .bar { background: var(--primary); }
+.bar-col:hover .bar, .bar-col:focus .bar { background: #8fb0ea; }
+.bar-col.is-today:hover .bar, .bar-col.is-today:focus .bar { background: var(--primary-600); }
+.bar-label { height: 28px; display: grid; place-items: center; font-size: .82rem; color: var(--muted); }
+.bar-tip { position: absolute; bottom: calc(100% - 20px); left: 50%; transform: translateX(-50%); background: var(--text); color: #fff; font-size: .78rem; padding: 6px 10px; border-radius: 8px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s; z-index: 2; }
+.bar-tip b { display: block; }
+.bar-col:hover .bar-tip, .bar-col:focus .bar-tip { opacity: 1; }
+
+.todo h2 { margin-bottom: var(--space-2); }
+.todo-item { display: block; padding: var(--space-4) var(--space-2); border-bottom: 1px solid var(--border); color: inherit; border-radius: 8px; }
+.todo-item:last-child { border-bottom: 0; }
+.todo-item:hover { background: var(--surface-2); text-decoration: none; }
+.todo-item > div { margin-top: 6px; }
+
+.admin-filter input { flex: 1; min-width: 200px; }
+.admin-filter select { width: auto; }
+.seg-tabs { display: inline-flex; gap: 4px; background: var(--surface); border: 1px solid var(--border); padding: 4px; border-radius: 12px; margin-bottom: var(--gap); flex-wrap: wrap; }
+.seg-tabs a { padding: 7px 14px; border-radius: 9px; color: var(--muted); font-weight: 600; }
+.seg-tabs a:hover { text-decoration: none; color: var(--text); }
+.seg-tabs a.active { background: var(--primary); color: #fff; }
+
+.req.focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-50), var(--shadow); }
+.req-reason { display: flex; gap: var(--space-2); align-items: flex-start; background: var(--surface-2); border-radius: 10px; padding: var(--space-3) var(--space-4); margin-top: var(--space-4); font-style: italic; }
+.req-reason .ic { flex-shrink: 0; margin-top: 3px; color: var(--muted); }
+.req-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--gap); margin: var(--space-4) 0; align-items: start; }
+.req-money { background: var(--surface-2); border-radius: 10px; padding: var(--space-3) var(--space-4); }
+.req-decided { border-top: 1px solid var(--border); padding-top: var(--space-3); }
+table.compare td, table.compare th { padding: 6px 8px; }
+table.compare tr.changed td:last-child { font-weight: 700; color: var(--primary); }
+.req-hist { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+.req-hist:first-of-type { border-top: 0; padding-top: 0; }
+
+.occ { display: flex; align-items: center; gap: var(--space-2); font-variant-numeric: tabular-nums; }
+.occ-bar { width: 70px; height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.occ-bar span { display: block; height: 100%; background: var(--primary); border-radius: 999px; }
+
+@media (max-width: 1100px) {
+  .admin-split { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .admin-layout { grid-template-columns: 1fr; align-content: start; }
+  .admin-side { position: static; height: auto; padding: var(--space-2); }
+  .admin-side-label { display: none; }
+  .admin-side nav { flex-direction: row; overflow-x: auto; }
+  .admin-side a { white-space: nowrap; }
+  .admin-main { padding: var(--space-4); }
+  .kpis.grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .req-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .kpis.grid-4, .kpis.grid-3, .mini-stats { grid-template-columns: 1fr; }
+}
+
+/* กำลังพิมพ์... (บัดดี้ตัวอย่างตอบอัตโนมัติ) */
+.chat-typing { padding: 6px var(--pad); font-size: .82rem; color: var(--muted); background: var(--surface-2); display: flex; align-items: center; gap: 8px; }
+.chat-typing .dots { display: inline-flex; gap: 3px; background: var(--surface); padding: 7px 10px; border-radius: 12px; box-shadow: var(--shadow); }
+.chat-typing .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: typing-dot 1s infinite ease-in-out; }
+.chat-typing .dots i:nth-child(2) { animation-delay: .15s; }
+.chat-typing .dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes typing-dot { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .chat-typing .dots i { animation: none; opacity: .6; } }

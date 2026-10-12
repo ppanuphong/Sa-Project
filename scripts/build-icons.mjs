@@ -7,7 +7,8 @@ const NAMES = [
   'circle-check', 'circle-x', 'info', 'undo-2', 'concierge-bell', 'luggage', 'pencil', 'file-text', 'star',
   'message-circle', 'list-checks', 'plane', 'flag', 'lock', 'compass', 'image', 'log-out', 'arrow-right',
   'wallet', 'arrow-up-down', 'chevron-down', 'smartphone', 'heart', 'arrow-down-narrow-wide', 'arrow-up-wide-narrow',
-  'printer', 'ticket',
+  'printer', 'ticket', 'layout-dashboard', 'list', 'rotate-ccw', 'building-2', 'arrow-right-left', 'trending-up',
+  'trending-down', 'door-open', 'clock', 'inbox',
 ];
 
 const icons = {};

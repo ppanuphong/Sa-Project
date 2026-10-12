@@ -9,14 +9,14 @@ import { db, parseJSON } from '../db.js';
 
 const ACTIVE = "('pending','confirmed','checked_in')";
 
-const claudeEnabled = () =>
+export const claudeEnabled = () =>
   process.env.AI_AGENT !== 'local' &&
   Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.AI_AGENT === 'claude');
 
 let client;
-const getClient = () => (client ??= new Anthropic());
+export const getClient = () => (client ??= new Anthropic());
 
-function tripsOf(userId) {
+export function tripsOf(userId) {
   return db.prepare(`
     SELECT h.id AS hotel_id, h.name AS hotel, h.city, b.check_in, b.check_out
     FROM bookings b JOIN rooms r ON r.id = b.room_id JOIN hotels h ON h.id = r.hotel_id

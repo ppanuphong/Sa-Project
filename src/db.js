@@ -125,6 +125,19 @@ CREATE TABLE IF NOT EXISTS messages (
   text TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS booking_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  booking_id INTEGER NOT NULL REFERENCES bookings(id),
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL,                              -- edit | cancel
+  status TEXT NOT NULL DEFAULT 'pending',          -- pending | approved | rejected | withdrawn
+  data TEXT NOT NULL DEFAULT '{}',                 -- JSON: edit = ค่าเดิม/ค่าใหม่, cancel = นโยบายคืนเงิน ณ วันที่ขอ
+  reason TEXT,                                     -- เหตุผลจากลูกค้า
+  admin_note TEXT,                                 -- หมายเหตุจากแอดมิน
+  decided_by INTEGER REFERENCES users(id),
+  decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   reporter_id INTEGER NOT NULL REFERENCES users(id),
@@ -140,6 +153,15 @@ const hotelCols = db.prepare('PRAGMA table_info(hotels)').all().map((c) => c.nam
 if (!hotelCols.includes('photos')) db.exec("ALTER TABLE hotels ADD COLUMN photos TEXT NOT NULL DEFAULT '[]'");
 if (!hotelCols.includes('star_class')) db.exec('ALTER TABLE hotels ADD COLUMN star_class INTEGER NOT NULL DEFAULT 4');
 
+// ---------- migration: บัดดี้ตัวอย่างที่ตอบแชทอัตโนมัติ ----------
+const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (!userCols.includes('auto_reply')) db.exec('ALTER TABLE users ADD COLUMN auto_reply INTEGER NOT NULL DEFAULT 0');
+const SAMPLE_BUDDIES = ['mali', 'somchai', 'nok', 'ploy', 'ton', 'fah', 'bank', 'mint', 'pete', 'jane'];
+function markSampleBuddies() {
+  db.prepare(`UPDATE users SET auto_reply = 1 WHERE role = 'customer' AND username IN (${SAMPLE_BUDDIES.map(() => '?').join(',')})`)
+    .run(...SAMPLE_BUDDIES);
+}
+
 // รูปภาพจาก Unsplash (เก็บเป็น photo id) + ระดับดาว
 const HOTEL_MEDIA = {
   'ริเวอร์ไซด์ แกรนด์ บางกอก': [5, ['1542314831-068cd1dbfeeb', '1590490360182-c33d57733427', '1571896349842-33c89424de2d', '1414235077428-338989a2e8c0']],
@@ -154,6 +176,52 @@ const HOTEL_MEDIA = {
 function applyHotelMedia() {
   const upd = db.prepare("UPDATE hotels SET star_class = ?, photos = ? WHERE name = ? AND photos = '[]'");
   for (const [name, [stars, photos]] of Object.entries(HOTEL_MEDIA)) upd.run(stars, JSON.stringify(photos), name);
+}
+
+// ความจุห้องแต่ละประเภท (ใช้ปรับฐานข้อมูลเดิมให้ตรงกับค่าใน seed)
+// 1–3 คน: Standard / Deluxe / Family Suite · 4–5 คน: Deluxe / Family Suite · 6 คน: Family Suite
+const ROOM_SPECS = {
+  Standard: [3, 'เตียงควีน 1 + เตียงเสริม 1'],
+  Deluxe: [5, 'เตียงคิง 1 + เตียงเดี่ยว 2'],
+  'Family Suite': [6, 'เตียงคิง 2 + เตียงเดี่ยว 2'],
+};
+function applyRoomSpecs() {
+  const upd = db.prepare('UPDATE rooms SET capacity = ?, bed = ? WHERE type = ?');
+  for (const [type, [capacity, bed]] of Object.entries(ROOM_SPECS)) upd.run(capacity, bed, type);
+}
+
+// คำขอแก้ไข/ยกเลิกตัวอย่าง ให้แดชบอร์ดแอดมินมีรายการรอตรวจสอบ (สร้างครั้งเดียวตอนยังไม่มีคำขอเลย)
+function seedRequests() {
+  if (db.prepare('SELECT COUNT(*) AS n FROM booking_requests').get().n) return;
+  const pick = (username) => db.prepare(`
+    SELECT b.*, r.type AS room_type, r.price, r.hotel_id FROM bookings b
+    JOIN rooms r ON r.id = b.room_id JOIN users u ON u.id = b.user_id
+    WHERE u.username = ? AND b.status = 'confirmed' AND b.check_in > date('now', 'localtime')
+    ORDER BY b.check_in LIMIT 1`).get(username);
+  const ins = db.prepare(`INSERT INTO booking_requests (booking_id, user_id, type, data, reason, created_at)
+    VALUES (?,?,?,?,?, datetime('now', ?))`);
+
+  const e = pick('mali');
+  if (e) {
+    const suite = db.prepare("SELECT * FROM rooms WHERE hotel_id = ? AND type = 'Family Suite'").get(e.hotel_id);
+    if (suite) {
+      const n = Math.round((new Date(e.check_out) - new Date(e.check_in)) / 86400000);
+      const sub = suite.price * n * e.rooms_count, total = n >= 3 ? sub - Math.round(sub * 0.1) : sub;
+      const data = {
+        before: { checkIn: e.check_in, checkOut: e.check_out, guests: e.guests, roomId: e.room_id, roomType: e.room_type, total: e.total_price },
+        after: { checkIn: e.check_in, checkOut: e.check_out, guests: 4, roomId: suite.id, roomType: suite.type, total },
+      };
+      ins.run(e.id, e.user_id, 'edit', JSON.stringify(data), 'เพื่อนจะมาด้วยอีก 3 คน ขอเปลี่ยนเป็นห้องใหญ่', '-3 hours');
+    }
+  }
+  const c = pick('nok');
+  if (c) {
+    const days = Math.round((new Date(c.check_in) - new Date(today())) / 86400000);
+    const percent = days >= 7 ? 100 : days >= 3 ? 50 : 0;
+    const rule = percent === 100 ? 'ยกเลิกล่วงหน้า 7 วันขึ้นไป: คืนเงิน 100%' : percent ? 'ยกเลิกล่วงหน้า 3–6 วัน: คืนเงิน 50%' : 'ยกเลิกน้อยกว่า 3 วันก่อนเช็คอิน: ไม่คืนเงิน';
+    const policy = { daysBefore: days, percent, rule, paid: c.paid_amount, refund: Math.round(c.paid_amount * percent / 100) };
+    ins.run(c.id, c.user_id, 'cancel', JSON.stringify(policy), 'ติดธุระด่วน ไปไม่ได้แล้ว', '-1 day');
+  }
 }
 
 // ---------- helpers ----------
@@ -215,9 +283,9 @@ function seed() {
 
   const roomSets = [
     // [type, desc, priceFactor, capacity, total, bed, size, amenities]
-    ['Standard', 'ห้องมาตรฐาน กว้างขวาง สะอาด ครบครัน', 1, 2, 6, 'เตียงควีน 1 เตียง', 26, ['แอร์', 'ทีวี', 'ตู้เย็น']],
-    ['Deluxe', 'ห้องดีลักซ์ พร้อมระเบียงและวิวสวย', 1.6, 2, 4, 'เตียงคิง 1 เตียง', 34, ['แอร์', 'ระเบียง', 'อ่างอาบน้ำ', 'มินิบาร์']],
-    ['Family Suite', 'ห้องสวีทสำหรับครอบครัว มีห้องนั่งเล่นแยก', 2.6, 4, 2, 'เตียงคิง 1 + เตียงเดี่ยว 2', 58, ['แอร์', 'ห้องนั่งเล่น', 'เครื่องชงกาแฟ', 'อ่างอาบน้ำ']],
+    ['Standard', 'ห้องมาตรฐาน กว้างขวาง สะอาด ครบครัน', 1, 3, 6, 'เตียงควีน 1 + เตียงเสริม 1', 26, ['แอร์', 'ทีวี', 'ตู้เย็น']],
+    ['Deluxe', 'ห้องดีลักซ์ พร้อมระเบียงและวิวสวย', 1.6, 5, 4, 'เตียงคิง 1 + เตียงเดี่ยว 2', 34, ['แอร์', 'ระเบียง', 'อ่างอาบน้ำ', 'มินิบาร์']],
+    ['Family Suite', 'ห้องสวีทสำหรับครอบครัว มีห้องนั่งเล่นแยก', 2.6, 6, 2, 'เตียงคิง 2 + เตียงเดี่ยว 2', 58, ['แอร์', 'ห้องนั่งเล่น', 'เครื่องชงกาแฟ', 'อ่างอาบน้ำ']],
   ];
   const basePrices = [2400, 1500, 1800, 1200, 2100, 6500, 1900, 1400];
 
@@ -341,6 +409,9 @@ function seedExtraBuddies() {
 seed();
 seedExtraBuddies();
 applyHotelMedia();
+applyRoomSpecs();
+seedRequests();
+markSampleBuddies();
 
 if (process.argv.includes('--seed-only')) {
   console.log('✅ สร้างฐานข้อมูลเรียบร้อย:', DB_PATH);

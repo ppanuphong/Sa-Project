@@ -84,7 +84,7 @@ function renderNav(path = '') {
   if (!u) {
     $nav.innerHTML = link('#/search', 'ค้นหาโรงแรม') + `<a href="#/login" class="btn outline sm">เข้าสู่ระบบ</a><a href="#/register" class="btn sm">สร้างบัญชี</a>`;
   } else if (u.role === 'admin') {
-    $nav.innerHTML = link('#/admin', 'แดชบอร์ดผู้ดูแล') + link('#/search', 'ค้นหาโรงแรม') + bell +
+    $nav.innerHTML = link('#/admin', 'แดชบอร์ดผู้ดูแล') +
       `<span class="who">${ic('circle-user', 20)} ${esc(u.name)}</span><button class="linklike" id="logout">ออกจากระบบ</button>`;
   } else {
     $nav.innerHTML = link('#/search', 'ค้นหาโรงแรม') + link('#/bookings', 'การจองของฉัน') + link('#/buddy', 'จับคู่บัดดี้') + bell +
@@ -802,7 +802,8 @@ async function bookingPage(id) {
   loading();
   const b = await api('GET', `/bookings/${id}`);
   const isAdmin = state.user.role === 'admin';
-  const canEdit = ['pending', 'confirmed'].includes(b.status);
+  const pr = b.pending_request;
+  const canEdit = ['pending', 'confirmed'].includes(b.status) && !pr;
 
   $app.innerHTML = `
     <p><a href="${isAdmin ? '#/admin' : '#/bookings'}">← ${isAdmin ? 'กลับแดชบอร์ด' : 'การจองทั้งหมดของฉัน'}</a></p>
@@ -816,6 +817,13 @@ async function bookingPage(id) {
           ${b.status !== 'cancelled' ? timeline(b) : `<div class="alert error" style="margin-top:var(--space-3)">การจองนี้ถูกยกเลิกเมื่อ ${fmtDateTime(b.cancelled_at)}</div>`}
           ${b.status === 'pending' ? `<div class="alert warning" style="margin-top:var(--space-3)">รอชำระเงิน ${money(b.amount_due)} เพื่อยืนยันการจอง</div>` : ''}
           ${b.status === 'confirmed' ? `<div class="alert success" style="margin-top:var(--space-3)">${ic('circle-check', 16)} การจองได้รับการยืนยันแล้ว — แสดงรหัสการจองนี้ที่เคาน์เตอร์เมื่อเช็คอิน</div>` : ''}
+          ${pr ? `<div class="alert warning" style="margin-top:var(--space-3)">
+            <div class="row between"><b>${ic('clock', 16)} ${pr.type === 'edit' ? 'คำขอแก้ไข' : 'คำขอยกเลิก'}รอแอดมินตรวจสอบ</b>
+              ${!isAdmin ? `<button class="btn secondary sm" id="withdraw">ถอนคำขอ</button>` : `<a class="btn sm" href="#/admin/requests/${pr.type}?id=${pr.id}">ไปตรวจสอบ</a>`}</div>
+            <div class="small" style="margin-top:4px">${pr.type === 'edit'
+              ? `ขอเปลี่ยนเป็น ${esc(pr.data.after.roomType)} · ${pr.data.after.guests} คน · ${fmtDate(pr.data.after.checkIn)} – ${fmtDate(pr.data.after.checkOut)} · ราคาใหม่ ${money(pr.data.after.total)}`
+              : `ยอดคืนเงินโดยประมาณ ${money(pr.data.refund)} (${esc(pr.data.rule)})`} · ส่งเมื่อ ${fmtDateTime(pr.created_at)}</div>
+          </div>` : ''}
         </div>
         <div class="card">
           <h2>รายละเอียดการเข้าพัก</h2>
@@ -828,6 +836,14 @@ async function bookingPage(id) {
             <div><div class="small muted">ความต้องการพิเศษ</div>${esc(b.special_request) || '<span class="muted">-</span>'}</div>
           </div>
         </div>
+        ${b.requests.some((r) => r.status !== 'pending') ? `<div class="card">
+          <h3>ประวัติคำขอเปลี่ยนแปลง</h3>
+          ${b.requests.filter((r) => r.status !== 'pending').map((r) => `<div class="req-hist">
+            <div class="row between"><b>${r.type === 'edit' ? 'คำขอแก้ไข' : 'คำขอยกเลิก'}</b>${reqPill(r.status)}</div>
+            <div class="small muted">ส่งเมื่อ ${fmtDateTime(r.created_at)}${r.decided_at ? ` · พิจารณาเมื่อ ${fmtDateTime(r.decided_at)}` : ''}</div>
+            ${r.admin_note ? `<div class="small">หมายเหตุจากแอดมิน: ${esc(r.admin_note)}</div>` : ''}
+          </div>`).join('')}
+        </div>` : ''}
         <div class="card" id="review-card"></div>
         <div class="card">
           <h3>ประวัติการชำระเงิน</h3>
@@ -850,8 +866,8 @@ async function bookingPage(id) {
             ${b.status === 'confirmed' && isAdmin ? `<button class="btn block" data-act="checkin">${ic('concierge-bell')} เช็คอิน</button>` : ''}
             ${b.status === 'checked_in' && isAdmin ? `<button class="btn block" data-act="checkout">${ic('luggage')} เช็คเอาท์</button>` : ''}
             ${['confirmed', 'checked_in'].includes(b.status) && !isAdmin ? `<div class="alert info small">${ic('concierge-bell', 15)} ${b.status === 'confirmed' ? 'เช็คอินที่เคาน์เตอร์โรงแรม' : 'เช็คเอาท์ที่เคาน์เตอร์โรงแรม'} โดยเจ้าหน้าที่จะอัปเดตสถานะให้</div>` : ''}
-            ${canEdit && !isAdmin ? `<button class="btn secondary block" data-act="edit">${ic('pencil')} แก้ไขวันเข้าพัก</button>` : ''}
-            ${canEdit && !isAdmin ? `<button class="btn ghost block" style="color:var(--danger)" data-act="cancel">ยกเลิกการจอง</button>` : ''}
+            ${canEdit && !isAdmin ? `<button class="btn secondary block" data-act="edit">${ic('pencil')} ขอแก้ไขการจอง</button>` : ''}
+            ${canEdit && !isAdmin ? `<button class="btn ghost block" style="color:var(--danger)" data-act="cancel">ขอยกเลิกการจอง</button>` : ''}
           </div>
         </div>
       </div>
@@ -879,6 +895,11 @@ async function bookingPage(id) {
     $rv.remove();
   }
 
+  document.getElementById('withdraw')?.addEventListener('click', async (e) => {
+    try { const r = await withButton(e.target, () => api('POST', `/requests/${pr.id}/withdraw`)); toast(r.message, 'success'); bookingPage(b.id); }
+    catch (err) { toast(err.message, 'error'); }
+  });
+
   document.getElementById('actions').addEventListener('click', async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
@@ -889,52 +910,84 @@ async function bookingPage(id) {
         refreshUnread(); bookingPage(b.id);
       } catch (err) { toast(err.message, 'error'); }
     }
-    if (act === 'edit') editDatesModal(b);
+    if (act === 'edit') editBookingModal(b);
     if (act === 'cancel') cancelModal(b);
   });
 }
 
-function editDatesModal(b) {
+function editBookingModal(b) {
   const m = modal(`
-    <h2>แก้ไขวันเข้าพัก</h2>
-    <p class="muted small">${esc(b.hotel_name)} · ${esc(b.room_type)} × ${b.rooms_count} ห้อง</p>
+    <h2>ขอแก้ไขการจอง</h2>
+    <p class="muted small">${esc(b.hotel_name)} · ${b.rooms_count} ห้อง</p>
     <form id="ed">
       <div class="grid grid-2">
-        <div class="field"><label>เช็คอินใหม่</label><input type="date" name="checkIn" min="${todayISO()}" value="${b.check_in}" required></div>
-        <div class="field"><label>เช็คเอาท์ใหม่</label><input type="date" name="checkOut" min="${addDays(b.check_in, 1)}" value="${b.check_out}" required></div>
+        <div class="field"><label>เช็คอิน</label><input type="date" name="checkIn" min="${todayISO()}" value="${b.check_in}" required></div>
+        <div class="field"><label>เช็คเอาท์</label><input type="date" name="checkOut" min="${addDays(b.check_in, 1)}" value="${b.check_out}" required></div>
       </div>
+      <div class="grid grid-2">
+        <div class="field"><label>จำนวนผู้เข้าพัก</label><input type="number" name="guests" min="1" value="${b.guests}" required></div>
+        <div class="field"><label>ประเภทห้อง</label><select name="roomId"><option value="${b.room_id}">${esc(b.room_type)}</option></select></div>
+      </div>
+      <div class="hint" id="room-hint" style="margin:-6px 0 var(--space-3)"></div>
       <div id="qt" class="card" style="box-shadow:none;background:var(--surface-2)"></div>
+      <div class="field" style="margin-top:var(--space-4)"><label>เหตุผล / ข้อความถึงแอดมิน (ไม่บังคับ)</label><textarea name="reason" placeholder="เช่น มีเพื่อนมาเพิ่ม 2 คน"></textarea></div>
+      <div class="small muted">${ic('info', 14)} การแก้ไขจะมีผลเมื่อแอดมินอนุมัติ ส่วนต่างราคาจะเรียกเก็บหรือคืนให้หลังอนุมัติ</div>
       <div class="row" style="justify-content:flex-end;margin-top:var(--space-4)">
         <button type="button" class="btn secondary" data-close>ยกเลิก</button>
-        <button class="btn" id="save" disabled>บันทึกการแก้ไข</button>
+        <button class="btn" id="save" disabled>ส่งคำขอแก้ไข</button>
       </div>
     </form>`);
   const f = m.el.querySelector('#ed'), $qt = m.el.querySelector('#qt'), $save = m.el.querySelector('#save');
+  const $hint = m.el.querySelector('#room-hint');
+  let seq = 0;
   const preview = async () => {
     if (f.checkOut.value <= f.checkIn.value) f.checkOut.value = addDays(f.checkIn.value, 1);
     f.checkOut.min = addDays(f.checkIn.value, 1);
+    const guests = Math.max(1, Number(f.guests.value) || 1);
+    const my = ++seq;
     try {
-      const q = await api('GET', `/bookings/${b.id}/quote?checkIn=${f.checkIn.value}&checkOut=${f.checkOut.value}`);
-      const unchanged = f.checkIn.value === b.check_in && f.checkOut.value === b.check_out;
+      const params = (roomId) => new URLSearchParams({ checkIn: f.checkIn.value, checkOut: f.checkOut.value, guests, roomId });
+      let q = await api('GET', `/bookings/${b.id}/quote?${params(f.roomId.value)}`);
+      if (my !== seq) return;
+      f.guests.max = q.maxGuests;
+      if (guests > q.maxGuests) { f.guests.value = q.maxGuests; return preview(); }
+      // ประเภทห้องที่เลือกไว้รองรับจำนวนคนไม่พอ → เปลี่ยนเป็นห้องที่เหมาะสมและว่างที่ถูกที่สุด
+      const options = q.rooms.filter((r) => r.fits);
+      if (!q.fits) {
+        const pick = options.find((r) => r.available) || options[0];
+        if (pick) {
+          q = await api('GET', `/bookings/${b.id}/quote?${params(pick.id)}`);
+          if (my !== seq) return;
+        }
+      }
+      f.roomId.innerHTML = options.map((r) => `<option value="${r.id}" ${r.id === q.roomId ? 'selected' : ''} ${r.available ? '' : 'disabled'}>
+        ${esc(r.type)} · สูงสุด ${r.capacity} คน/ห้อง · ${money(r.total)}${r.available ? '' : ' (ไม่ว่าง)'}</option>`).join('');
+      const hidden = q.rooms.length - options.length;
+      $hint.textContent = hidden ? `แสดงเฉพาะห้องที่รองรับ ${guests} คน (${b.rooms_count} ห้อง)` : '';
+      const unchanged = f.checkIn.value === b.check_in && f.checkOut.value === b.check_out
+        && guests === b.guests && q.roomId === b.room_id;
       $save.disabled = !q.available || unchanged;
       $qt.innerHTML = `
-        <div class="line"><span>${q.nights} คืน × ${b.rooms_count} ห้อง</span><span>${money(q.subtotal)}</span></div>
+        <div class="line"><span>${esc(q.rooms.find((r) => r.id === q.roomId)?.type)} · ${q.nights} คืน × ${b.rooms_count} ห้อง</span><span>${money(q.subtotal)}</span></div>
         ${q.discount ? `<div class="line discount"><span>${q.promo}</span><span>-${money(q.discount)}</span></div>` : ''}
         <div class="line total"><span>ราคาใหม่</span><span>${money(q.total)}</span></div>
         <div class="line"><span>ชำระแล้ว</span><span>${money(q.paid)}</span></div>
-        ${!q.available ? `<div class="alert error" style="margin:8px 0 0">ห้องไม่ว่างในช่วงวันที่นี้</div>`
-          : q.paid > 0 && q.difference > 0 ? `<div class="alert warning" style="margin:8px 0 0">ต้องชำระส่วนต่างเพิ่ม ${money(q.difference)}</div>`
-          : q.difference < 0 && q.paid > 0 ? `<div class="alert success" style="margin:8px 0 0">จะได้รับเงินคืนส่วนต่าง ${money(-q.difference)}</div>` : ''}`;
-    } catch (err) { $save.disabled = true; $qt.innerHTML = `<div class="alert error" style="margin:0">${esc(err.message)}</div>`; }
+        ${!q.available ? `<div class="alert error" style="margin:8px 0 0">ห้องประเภทนี้ไม่ว่างในช่วงวันที่เลือก</div>`
+          : q.paid > 0 && q.difference > 0 ? `<div class="alert warning" style="margin:8px 0 0">หากอนุมัติ ต้องชำระส่วนต่างเพิ่ม ${money(q.difference)}</div>`
+          : q.difference < 0 && q.paid > 0 ? `<div class="alert success" style="margin:8px 0 0">หากอนุมัติ จะได้รับเงินคืนส่วนต่าง ${money(-q.difference)}</div>` : ''}`;
+    } catch (err) {
+      if (my !== seq) return;
+      $save.disabled = true; $qt.innerHTML = `<div class="alert error" style="margin:0">${esc(err.message)}</div>`;
+    }
   };
   f.addEventListener('change', preview);
+  f.guests.addEventListener('input', () => { if (f.guests.value) preview(); });
   preview();
   f.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const r = await withButton($save, () => api('PATCH', `/bookings/${b.id}`, formData(f)));
-      m.close(); toast(r.message, 'success'); refreshUnread();
-      r.booking.status === 'pending' ? go(`#/pay/${b.id}`) : bookingPage(b.id);
+      const r = await withButton($save, () => api('POST', `/bookings/${b.id}/requests`, { type: 'edit', ...formData(f) }));
+      m.close(); toast(r.message, 'success'); bookingPage(b.id);
     } catch (err) { toast(err.message, 'error'); }
   });
 }
@@ -942,7 +995,7 @@ function editDatesModal(b) {
 async function cancelModal(b) {
   const p = await api('GET', `/bookings/${b.id}/refund-preview`);
   const m = modal(`
-    <h2>ยกเลิกการจอง ${esc(b.code)}?</h2>
+    <h2>ขอยกเลิกการจอง ${esc(b.code)}?</h2>
     <p class="muted">เหลืออีก ${p.daysBefore} วันก่อนวันเช็คอิน</p>
     <div class="card" style="box-shadow:none;background:var(--surface-2)">
       <div class="small">${ic('file-text', 15)} ${esc(p.rule)}</div>
@@ -950,15 +1003,16 @@ async function cancelModal(b) {
       <div class="line"><span>อัตราคืนเงิน</span><span>${p.percent}%</span></div>
       <div class="line total"><span>ยอดเงินที่จะได้รับคืน</span><span style="color:var(--success)">${money(p.refund)}</span></div>
     </div>
-    <p class="small muted" style="margin-top:var(--space-3)">เงินจะถูกคืนเข้าช่องทางเดิมภายใน 7–14 วันทำการ</p>
+    <div class="field" style="margin-top:var(--space-4)"><label>เหตุผลที่ยกเลิก (ไม่บังคับ)</label><textarea id="reason"></textarea></div>
+    <p class="small muted">${ic('info', 14)} อัตราคืนเงินคิดตามวันที่ส่งคำขอ การยกเลิกจะมีผลเมื่อแอดมินอนุมัติ และเงินจะคืนเข้าช่องทางเดิมภายใน 7–14 วันทำการ</p>
     <div class="row" style="justify-content:flex-end;margin-top:var(--space-4)">
       <button class="btn secondary" data-close>ไม่ยกเลิก</button>
-      <button class="btn danger" id="yes">ยืนยันการยกเลิก</button>
+      <button class="btn danger" id="yes">ส่งคำขอยกเลิก</button>
     </div>`);
   m.el.querySelector('#yes').addEventListener('click', async (e) => {
     try {
-      const r = await withButton(e.target, () => api('POST', `/bookings/${b.id}/cancel`));
-      m.close(); toast(`ยกเลิกแล้ว${r.policy.refund ? ` คืนเงิน ${money(r.policy.refund)}` : ''}`, 'success'); refreshUnread(); bookingPage(b.id);
+      const r = await withButton(e.target, () => api('POST', `/bookings/${b.id}/requests`, { type: 'cancel', reason: m.el.querySelector('#reason').value }));
+      m.close(); toast(r.message, 'success'); bookingPage(b.id);
     } catch (err) { toast(err.message, 'error'); }
   });
 }
@@ -1069,6 +1123,7 @@ function bookingCard(b, tab) {
           <span>${ic('bed-double', 14)} ${esc(b.room_type)} × ${b.rooms_count}</span>
           <span>${ic('users', 14)} ${b.guests} คน</span>
           <span>${ic('ticket', 14)} <code>${esc(b.code)}</code></span>
+          ${b.pending_request ? `<span class="pill pending">${ic('clock', 13)} ${b.pending_request === 'edit' ? 'ขอแก้ไข' : 'ขอยกเลิก'} รอแอดมินตรวจสอบ</span>` : ''}
         </div>
       </div>
       <div class="bk-side">
@@ -1501,10 +1556,11 @@ async function chatPage(id) {
     <div class="card chat">
       <div class="chat-head">
         ${avatar(o.name, 'sm')}
-        <div style="flex:1"><b>${esc(o.name)}</b><div class="small muted">${o.interests.map(esc).join(' · ')}</div></div>
+        <div style="flex:1"><b>${esc(o.name)}</b>${o.auto_reply ? ` <span class="pill" title="บัญชีตัวอย่างสำหรับทดลองใช้งาน ข้อความตอบกลับสร้างโดยระบบ">${ic('bot', 13)} บัดดี้ตัวอย่าง · ตอบอัตโนมัติ</span>` : ''}<div class="small muted">${o.interests.map(esc).join(' · ')}</div></div>
         <button class="btn ghost sm" id="report">${ic('flag', 15)} รายงาน</button>
       </div>
       <div class="chat-body" id="msgs"><div class="muted small" style="text-align:center">${ic('lock', 13)} แชทนี้เห็นเฉพาะคุณและ ${esc(o.name)} · อย่าแชร์ข้อมูลส่วนตัวที่ละเอียดอ่อน</div></div>
+      <div class="chat-typing" id="typing" hidden><span class="dots"><i></i><i></i><i></i></span> ${esc(o.name)} กำลังพิมพ์...</div>
       <form class="chat-form" id="send"><input name="text" placeholder="พิมพ์ข้อความ..." autocomplete="off" required><button class="btn">ส่ง</button></form>
     </div>`;
   const $msgs = document.getElementById('msgs');
@@ -1516,12 +1572,17 @@ async function chatPage(id) {
     lastId = list[list.length - 1].id;
     if (atBottom || list.some((m) => m.sender_id === state.user.id)) $msgs.scrollTop = $msgs.scrollHeight;
   };
+  const $typing = document.getElementById('typing');
+  const refresh = async () => {
+    const r = await api('GET', `/buddy/matches/${id}/messages?after=${lastId}`);
+    append(r.messages);
+    $typing.hidden = !r.typing;
+  };
   append(data.messages);
+  $typing.hidden = !data.typing;
   $msgs.scrollTop = $msgs.scrollHeight;
 
-  const poll = setInterval(async () => {
-    try { append((await api('GET', `/buddy/matches/${id}/messages?after=${lastId}`)).messages); } catch { /* ignore */ }
-  }, 3000);
+  const poll = setInterval(() => refresh().catch(() => { /* ignore */ }), o.auto_reply ? 1200 : 3000);
   cleanup = () => clearInterval(poll);
 
   document.getElementById('send').addEventListener('submit', async (e) => {
@@ -1532,7 +1593,7 @@ async function chatPage(id) {
     input.value = '';
     try {
       await api('POST', `/buddy/matches/${id}/messages`, { text });
-      append((await api('GET', `/buddy/matches/${id}/messages?after=${lastId}`)).messages);
+      await refresh();
     } catch (err) { toast(err.message, 'error'); input.value = text; }
   });
   document.getElementById('report').addEventListener('click', () => reportModal(o.id, o.name, () => go('#/buddy')));
@@ -1563,58 +1624,334 @@ async function notificationsPage() {
 }
 
 // ================= Pages: Admin =================
-async function adminPage(q) {
+// ================= Pages: Admin =================
+const REQ_STATUS = { pending: 'รอตรวจสอบ', approved: 'อนุมัติแล้ว', rejected: 'ปฏิเสธแล้ว', withdrawn: 'ลูกค้าถอนคำขอ' };
+const REQ_PILL = { pending: 'pending', approved: 'confirmed', rejected: 'cancelled', withdrawn: 'checked_out' };
+const reqPill = (s) => `<span class="pill ${REQ_PILL[s]}">${REQ_STATUS[s]}</span>`;
+const ago = (s) => {
+  const d = new Date(s.replace(' ', 'T') + 'Z'), days = nights(isoDate(d), todayISO());
+  return `${days === 0 ? 'วันนี้' : days === 1 ? 'เมื่อวาน' : fmtDate(isoDate(d))} ${fmtTime(s)}`;
+};
+
+// โครงหน้าแอดมิน: เมนูด้านซ้าย + หัวข้อหน้า
+async function adminShell(active, title, subtitle = '') {
+  const c = await api('GET', '/admin/counts');
+  const items = [
+    ['dashboard', '#/admin', 'layout-dashboard', 'แดชบอร์ด', 0],
+    ['bookings', '#/admin/bookings', 'list', 'การจองทั้งหมด', 0],
+    ['edit', '#/admin/requests/edit', 'pencil', 'คำขอแก้ไข', c.edit],
+    ['cancel', '#/admin/requests/cancel', 'rotate-ccw', 'คำขอยกเลิก/คืนเงิน', c.cancel],
+    ['hotels', '#/admin/hotels', 'building-2', 'โรงแรมและห้องพัก', 0],
+    ['reports', '#/admin/reports', 'flag', 'รายงานผู้ใช้', c.reports],
+  ];
+  const u = state.user;
+  $app.innerHTML = `
+    <div class="admin-layout">
+      <aside class="admin-side">
+        <div class="admin-side-label">ผู้ดูแลระบบ</div>
+        <nav>${items.map(([k, href, icon, label, n]) => `<a href="${href}" class="${k === active ? 'active' : ''}">${ic(icon, 19)}<span>${label}</span>${n ? `<b class="admin-badge">${n}</b>` : ''}</a>`).join('')}</nav>
+      </aside>
+      <section class="admin-main">
+        <header class="admin-head">
+          <div><h1>${title}</h1>${subtitle ? `<div class="muted">${subtitle}</div>` : ''}</div>
+          <div class="admin-me">${avatar(u.name)}<div><b>${esc(u.name)}</b><div class="small muted">@${esc(u.username)} · ผู้ดูแลระบบ</div></div></div>
+        </header>
+        <div id="admin-body"><div class="loading"><div class="spinner"></div>กำลังโหลด...</div></div>
+      </section>
+    </div>`;
+  return document.getElementById('admin-body');
+}
+
+async function adminRouter(seg, q) {
   if (!requireLogin()) return;
   if (state.user.role !== 'admin') { $app.innerHTML = `<div class="alert error">หน้านี้สำหรับผู้ดูแลระบบเท่านั้น</div>`; return; }
-  loading();
-  const status = q.get('status') || '';
-  const [stats, bookings, reports] = await Promise.all([
-    api('GET', '/admin/stats'), api('GET', `/admin/bookings?status=${status}`), api('GET', '/admin/reports'),
-  ]);
-  const count = (s) => stats.bookings.find((x) => x.status === s)?.n || 0;
-  $app.innerHTML = `
-    <h1>แดชบอร์ดผู้ดูแลระบบ</h1>
-    <div class="grid grid-4">
-      <div class="card stat"><div class="small muted">รายได้สุทธิ</div><div class="num">${money(stats.revenue)}</div></div>
-      <div class="card stat"><div class="small muted">ลูกค้าทั้งหมด</div><div class="num">${stats.users}</div></div>
-      <div class="card stat"><div class="small muted">รอเช็คอิน / พักอยู่</div><div class="num">${count('confirmed')} / ${count('checked_in')}</div></div>
-      <div class="card stat"><div class="small muted">รายงานที่รอตรวจสอบ</div><div class="num" style="color:${stats.openReports ? 'var(--danger)' : ''}">${stats.openReports}</div></div>
+  document.body.classList.add('admin-mode');
+  switch (seg[1]) {
+    case undefined: return adminDashboard();
+    case 'bookings': return adminBookings(q);
+    case 'requests': return adminRequests(seg[2] === 'cancel' ? 'cancel' : 'edit', q);
+    case 'hotels': return adminHotels();
+    case 'reports': return adminReports();
+    default: go('#/admin');
+  }
+}
+
+// ---------- แดชบอร์ด ----------
+function barChart(rows, unit) {
+  const max = Math.max(4, ...rows.map((r) => r.n));
+  const top = Math.ceil(max / 4) * 4, ticks = [0, 1, 2, 3, 4].map((i) => (top / 4) * i);
+  return `
+    <div class="bars" role="img" aria-label="${rows.map((r) => `${r.label} ${r.n} ${unit}`).join(', ')}">
+      <div class="bars-grid">${ticks.reverse().map((t) => `<div><span>${t}</span></div>`).join('')}</div>
+      <div class="bars-cols">${rows.map((r, i) => `
+        <div class="bar-col ${i === rows.length - 1 ? 'is-today' : ''}" tabindex="0">
+          <div class="bar-tip"><b>${r.n} ${unit}</b>${r.full}</div>
+          <div class="bar-track"><div class="bar" style="height:${(r.n / top) * 100}%"><span>${r.n}</span></div></div>
+          <div class="bar-label">${r.label}</div>
+        </div>`).join('')}</div>
+    </div>`;
+}
+
+function todoItem(r) {
+  const sub = r.type === 'cancel'
+    ? `${esc(r.user_name)} · คืน ${r.data.percent}% = ${money(Math.round(r.paid_amount * r.data.percent / 100))}`
+    : `${esc(r.user_name)} · ${ago(r.created_at)}`;
+  return `<a class="todo-item" href="#/admin/requests/${r.type}?id=${r.id}">
+    <b>${r.type === 'edit' ? 'คำขอแก้ไข' : 'ขอยกเลิก'} ${esc(r.code)}</b>
+    <div>${reqPill('pending')}</div>
+    <div class="small muted">${sub}</div></a>`;
+}
+
+async function adminDashboard() {
+  const dayName = new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+  const $b = await adminShell('dashboard', 'แดชบอร์ด', `ภาพรวม${dayName}`);
+  const d = await api('GET', '/admin/dashboard');
+  const diff = d.bookingsLastWeek ? Math.round(((d.bookingsToday - d.bookingsLastWeek) / d.bookingsLastWeek) * 100) : null;
+  const weekday = new Date(d.today + 'T00:00:00').toLocaleDateString('th-TH', { weekday: 'long' });
+  const trend = diff === null ? `<span class="muted">${weekday}ที่แล้ว ${d.bookingsLastWeek} รายการ</span>`
+    : `<span class="${diff >= 0 ? 'up' : 'down'}">${ic(diff >= 0 ? 'trending-up' : 'trending-down', 15)} ${Math.abs(diff)}% จาก${weekday}ที่แล้ว</span>`;
+  const total7 = d.last7.reduce((s, r) => s + r.n, 0);
+  const rows = d.last7.map((r) => {
+    const dt = new Date(r.date + 'T00:00:00');
+    return { n: r.n, label: dt.toLocaleDateString('th-TH', { weekday: 'short' }), full: fmtDate(r.date) };
+  });
+
+  $b.innerHTML = `
+    <div class="grid grid-4 kpis">
+      <div class="card kpi"><div class="kpi-label">การจองวันนี้</div><div class="kpi-num">${d.bookingsToday}</div><div class="kpi-sub">${trend}</div></div>
+      <a class="card kpi" href="#/admin/requests/edit"><div class="kpi-label">คำขอแก้ไขรอตรวจสอบ</div><div class="kpi-num">${d.pendingEdit}</div><div class="kpi-sub">${d.pendingEdit ? '<span class="down">ต้องจัดการ</span>' : '<span class="muted">ไม่มีงานค้าง</span>'}</div></a>
+      <a class="card kpi" href="#/admin/requests/cancel"><div class="kpi-label">คำขอยกเลิกรอตรวจสอบ</div><div class="kpi-num">${d.pendingCancel}</div><div class="kpi-sub">${d.pendingCancel ? '<span class="down">ต้องจัดการ</span>' : '<span class="muted">ไม่มีงานค้าง</span>'}</div></a>
+      <div class="card kpi"><div class="kpi-label">ยอดคืนเงินเดือนนี้</div><div class="kpi-num">${money(d.refundMonth.sum)}</div><div class="kpi-sub muted">จาก ${d.refundMonth.count} รายการ</div></div>
     </div>
+    <div class="admin-split">
+      <div>
+        <div class="card">
+          <div class="row between"><h2 style="margin:0">การจอง 7 วันล่าสุด</h2><span class="muted small">รวม ${total7} รายการ</span></div>
+          ${barChart(rows, 'การจอง')}
+        </div>
+        <div class="grid grid-3 mini-stats">
+          <a class="card" href="#/admin/bookings?status=confirmed">${ic('door-open', 20)}<div><b>${d.arrivals}</b><span>เช็คอินวันนี้</span></div></a>
+          <a class="card" href="#/admin/bookings?status=checked_in">${ic('luggage', 20)}<div><b>${d.departures}</b><span>เช็คเอาท์วันนี้</span></div></a>
+          <a class="card" href="#/admin/reports">${ic('flag', 20)}<div><b>${d.openReports}</b><span>รายงานผู้ใช้รอตรวจ</span></div></a>
+        </div>
+      </div>
+      <div class="card todo">
+        <h2>ต้องจัดการ</h2>
+        ${d.todo.length ? d.todo.map(todoItem).join('') : `<div class="empty slim"><div class="icon">${ic('inbox', 30)}</div>ไม่มีคำขอที่รอตรวจสอบ</div>`}
+      </div>
+    </div>`;
+}
+
+// ---------- การจองทั้งหมด ----------
+async function adminBookings(q) {
+  const status = q.get('status') || '', text = q.get('q') || '';
+  const $b = await adminShell('bookings', 'การจองทั้งหมด');
+  const list = await api('GET', `/admin/bookings?${new URLSearchParams({ status, q: text })}`);
+  $b.innerHTML = `
     <div class="card">
-      <div class="row between"><h2>การจองทั้งหมด</h2>
-        <select id="st" style="width:auto">${[['', 'ทุกสถานะ'], ...Object.entries(STATUS)].map(([k, l]) => `<option value="${k}" ${k === status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <form class="row admin-filter" id="flt">
+        <input name="q" value="${esc(text)}" placeholder="ค้นหารหัสการจอง ชื่อลูกค้า หรือโรงแรม">
+        <select name="status">${[['', 'ทุกสถานะ'], ...Object.entries(STATUS)].map(([k, l]) => `<option value="${k}" ${k === status ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <button class="btn">${ic('search', 16)} ค้นหา</button>
+      </form>
+      <div class="small muted" style="margin:var(--space-3) 0">พบ ${list.length} รายการ</div>
       <div class="table-wrap"><table>
         <tr><th>รหัส</th><th>ลูกค้า</th><th>โรงแรม / ห้อง</th><th>วันที่เข้าพัก</th><th>ยอด</th><th>สถานะ</th><th></th></tr>
-        ${bookings.map((b) => `<tr>
-          <td><a href="#/booking/${b.id}">${esc(b.code)}</a></td>
-          <td>${esc(b.guest_name)}<div class="small muted">@${esc(b.username)}</div></td>
+        ${list.map((b) => `<tr>
+          <td><a href="#/booking/${b.id}">${esc(b.code)}</a>${b.pending_request ? `<div><a class="pill pending" href="#/admin/requests/${b.pending_request}">${b.pending_request === 'edit' ? 'ขอแก้ไข' : 'ขอยกเลิก'}</a></div>` : ''}</td>
+          <td>${esc(b.guest_name)}<div class="small muted">@${esc(b.username)} · ${b.guests} คน</div></td>
           <td>${esc(b.hotel_name)}<div class="small muted">${esc(b.room_type)} × ${b.rooms_count}</div></td>
           <td class="small">${fmtDate(b.check_in)} – ${fmtDate(b.check_out)}</td>
-          <td>${money(b.total_price)}</td>
+          <td>${money(b.total_price)}${b.total_price > b.paid_amount && b.status === 'pending' ? `<div class="small" style="color:var(--warning)">ค้าง ${money(b.total_price - b.paid_amount)}</div>` : ''}</td>
           <td>${statusPill(b.status)}</td>
           <td>${b.status === 'confirmed' ? `<button class="btn sm" data-act="checkin" data-id="${b.id}">เช็คอิน</button>` : b.status === 'checked_in' ? `<button class="btn sm" data-act="checkout" data-id="${b.id}">เช็คเอาท์</button>` : ''}</td>
-        </tr>`).join('')}
+        </tr>`).join('') || '<tr><td colspan="7" class="muted">ไม่พบการจอง</td></tr>'}
       </table></div>
-    </div>
-    <div class="card">
-      <h2>รายงานผู้ใช้ไม่เหมาะสม</h2>
-      ${reports.length ? `<div class="table-wrap"><table><tr><th>วันที่</th><th>ผู้รายงาน</th><th>ผู้ถูกรายงาน</th><th>เหตุผล</th><th>สถานะ</th><th></th></tr>
-        ${reports.map((r) => `<tr>
-          <td class="small">${fmtDateTime(r.created_at)}</td><td>${esc(r.reporter_name)}</td>
-          <td>${esc(r.reported_name)} <span class="small muted">@${esc(r.reported_username)}</span>${r.buddy_enabled ? '' : '<div class="small" style="color:var(--danger)">ระงับฟีเจอร์บัดดี้แล้ว</div>'}</td>
-          <td class="small">${esc(r.reason)}</td>
-          <td><span class="pill ${r.status === 'open' ? 'pending' : 'confirmed'}">${r.status === 'open' ? 'รอตรวจสอบ' : 'ดำเนินการแล้ว'}</span></td>
-          <td>${r.status === 'open' ? `<div class="row"><button class="btn danger sm" data-resolve="${r.id}" data-suspend="1">ระงับผู้ใช้</button><button class="btn secondary sm" data-resolve="${r.id}">ปิดเรื่อง</button></div>` : ''}</td>
-        </tr>`).join('')}</table></div>` : '<p class="muted">ไม่มีรายงาน</p>'}
     </div>`;
-
-  document.getElementById('st').addEventListener('change', (e) => go('#/admin' + (e.target.value ? `?status=${e.target.value}` : '')));
-  $app.querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', async () => {
-    try { await withButton(btn, () => api('POST', `/bookings/${btn.dataset.id}/${btn.dataset.act}`)); toast('อัปเดตสถานะการจองแล้ว', 'success'); adminPage(q); }
+  const f = document.getElementById('flt');
+  f.addEventListener('submit', (e) => { e.preventDefault(); go('#/admin/bookings?' + new URLSearchParams(formData(f))); });
+  f.status.addEventListener('change', () => f.requestSubmit());
+  $b.querySelectorAll('[data-act]').forEach((btn) => btn.addEventListener('click', async () => {
+    try { await withButton(btn, () => api('POST', `/bookings/${btn.dataset.id}/${btn.dataset.act}`)); toast('อัปเดตสถานะการจองแล้ว', 'success'); adminBookings(q); }
     catch (err) { toast(err.message, 'error'); }
   }));
-  $app.querySelectorAll('[data-resolve]').forEach((btn) => btn.addEventListener('click', async () => {
-    try { await withButton(btn, () => api('POST', `/admin/reports/${btn.dataset.resolve}/resolve`, { suspend: !!btn.dataset.suspend })); toast('ดำเนินการแล้ว', 'success'); adminPage(q); }
+}
+
+// ---------- คำขอแก้ไข / ยกเลิก ----------
+function editCompare(r) {
+  const a = r.data.before, b = r.data.after;
+  const rowsDef = [
+    ['เช็คอิน', fmtDate(a.checkIn), fmtDate(b.checkIn)],
+    ['เช็คเอาท์', fmtDate(a.checkOut), fmtDate(b.checkOut)],
+    ['จำนวนคืน', `${nights(a.checkIn, a.checkOut)} คืน`, `${nights(b.checkIn, b.checkOut)} คืน`],
+    ['ประเภทห้อง', `${esc(a.roomType)} × ${r.rooms_count}`, `${esc(b.roomType)} × ${r.rooms_count}`],
+    ['ผู้เข้าพัก', `${a.guests} คน`, `${b.guests} คน`],
+    ['ราคารวม', money(a.total), money(r.check?.total ?? b.total)],
+  ];
+  return `<div class="table-wrap"><table class="compare">
+    <tr><th></th><th>เดิม</th><th></th><th>ขอเปลี่ยนเป็น</th></tr>
+    ${rowsDef.map(([k, x, y]) => `<tr class="${x !== y ? 'changed' : ''}"><td class="muted">${k}</td><td>${x}</td><td class="muted">${x !== y ? ic('arrow-right', 14) : ''}</td><td>${y}</td></tr>`).join('')}
+  </table></div>`;
+}
+
+function requestMoney(r) {
+  if (r.type === 'edit') {
+    const total = r.check?.total ?? r.data.after.total, diff = total - r.paid_amount;
+    return `<div class="line"><span>ลูกค้าชำระแล้ว</span><span>${money(r.paid_amount)}</span></div>
+      ${r.paid_amount > 0 && diff > 0 ? `<div class="line total"><span>ลูกค้าต้องชำระเพิ่ม</span><span style="color:var(--warning)">${money(diff)}</span></div>` : ''}
+      ${r.paid_amount > 0 && diff < 0 ? `<div class="line total"><span>ระบบจะคืนเงินส่วนต่าง</span><span style="color:var(--success)">${money(-diff)}</span></div>` : ''}
+      ${r.paid_amount > 0 && diff === 0 ? `<div class="line total"><span>ส่วนต่าง</span><span>${money(0)}</span></div>` : ''}`;
+  }
+  const refund = r.check?.refund ?? r.data.refund;
+  return `<div class="small">${ic('file-text', 14)} ${esc(r.data.rule)} <span class="muted">(ขอล่วงหน้า ${r.data.daysBefore} วัน)</span></div>
+    <div class="line"><span>ลูกค้าชำระแล้ว</span><span>${money(r.status === 'pending' ? r.paid_amount : r.data.paid)}</span></div>
+    <div class="line"><span>อัตราคืนเงิน</span><span>${r.data.percent}%</span></div>
+    <div class="line total"><span>ยอดคืนเงิน</span><span style="color:var(--success)">${money(refund)}</span></div>`;
+}
+
+function requestCard(r, focus) {
+  const warn = r.status === 'pending' && r.type === 'edit' && r.check
+    ? r.check.error ? `<div class="alert error">${esc(r.check.error)}</div>`
+      : !r.check.fits ? `<div class="alert error">ห้องที่ขอรองรับผู้เข้าพักไม่พอ</div>`
+      : !r.check.available ? `<div class="alert error">${ic('circle-x', 15)} ห้องที่ขอไม่ว่างแล้วในช่วงวันที่นี้ — ควรปฏิเสธคำขอ</div>`
+      : `<div class="alert success">${ic('circle-check', 15)} ตรวจสอบแล้ว ห้องว่างและรองรับจำนวนผู้เข้าพัก</div>` : '';
+  return `
+    <article class="card req ${focus ? 'focus' : ''}" id="req-${r.id}">
+      <div class="row between">
+        <div><h3 style="margin:0">${r.type === 'edit' ? 'คำขอแก้ไข' : 'ขอยกเลิก'} <a href="#/booking/${r.booking_id}">${esc(r.code)}</a></h3>
+          <div class="small muted">${esc(r.user_name)} (@${esc(r.username)}) · ${esc(r.hotel_name)} · ส่งเมื่อ ${ago(r.created_at)}</div></div>
+        <div class="row">${statusPill(r.booking_status)}${reqPill(r.status)}</div>
+      </div>
+      ${r.reason ? `<div class="req-reason">${ic('message-circle', 15)} <span>“${esc(r.reason)}”</span></div>` : ''}
+      <div class="req-grid">
+        <div>${r.type === 'edit' ? editCompare(r) : `
+          <div class="line"><span>เข้าพัก</span><b>${fmtDate(r.check_in)} – ${fmtDate(r.check_out)}</b></div>
+          <div class="line"><span>ผู้เข้าพัก</span><span>${esc(r.guest_name)} · ${r.guests} คน · ${r.rooms_count} ห้อง</span></div>
+          <div class="line"><span>ราคารวม</span><span>${money(r.total_price)}</span></div>`}</div>
+        <div class="req-money">${requestMoney(r)}</div>
+      </div>
+      ${warn}
+      ${r.status === 'pending' ? `
+        <div class="row" style="justify-content:flex-end">
+          <button class="btn secondary" data-reject="${r.id}">${ic('circle-x', 16)} ปฏิเสธ</button>
+          <button class="btn ${r.type === 'cancel' ? 'danger' : ''}" data-approve="${r.id}" ${r.type === 'edit' && r.check && !(r.check.fits && r.check.available) ? 'disabled' : ''}>${ic('circle-check', 16)} ${r.type === 'edit' ? 'อนุมัติการแก้ไข' : 'อนุมัติยกเลิกและคืนเงิน'}</button>
+        </div>`
+      : r.decided_at ? `<div class="small muted req-decided">${REQ_STATUS[r.status]} ${ago(r.decided_at)}${r.decided_by_name ? ` โดย ${esc(r.decided_by_name)}` : ''}${r.admin_note ? ` — หมายเหตุ: ${esc(r.admin_note)}` : ''}</div>` : ''}
+    </article>`;
+}
+
+async function adminRequests(type, q) {
+  const status = q.get('status') ?? 'pending', focus = Number(q.get('id')) || 0;
+  const title = type === 'edit' ? 'คำขอแก้ไขการจอง' : 'คำขอยกเลิก/คืนเงิน';
+  const $b = await adminShell(type, title, type === 'edit' ? 'ตรวจสอบการเปลี่ยนวันที่ ประเภทห้อง และจำนวนผู้เข้าพัก' : 'ตรวจสอบการยกเลิกและยอดคืนเงินตามนโยบาย');
+  const list = await api('GET', `/admin/requests?type=${type}&status=${status}`);
+  const tabs = [['pending', 'รอตรวจสอบ'], ['approved', 'อนุมัติแล้ว'], ['rejected', 'ปฏิเสธแล้ว'], ['', 'ทั้งหมด']];
+  $b.innerHTML = `
+    <div class="seg-tabs">${tabs.map(([k, l]) => `<a href="#/admin/requests/${type}${k === 'pending' ? '' : `?status=${k}`}" class="${k === status ? 'active' : ''}">${l}</a>`).join('')}</div>
+    ${list.length ? list.map((r) => requestCard(r, r.id === focus)).join('')
+      : `<div class="card empty"><div class="icon">${ic('inbox', 36)}</div>${status === 'pending' ? 'ไม่มีคำขอที่รอตรวจสอบ' : 'ไม่มีรายการ'}</div>`}`;
+  if (focus) document.getElementById(`req-${focus}`)?.scrollIntoView({ block: 'center' });
+
+  const decide = (id, decision, note) => api('POST', `/admin/requests/${id}/${decision}`, { note });
+  $b.querySelectorAll('[data-approve]').forEach((btn) => btn.addEventListener('click', () => {
+    const r = list.find((x) => x.id === Number(btn.dataset.approve));
+    const m = modal(`
+      <h2>${r.type === 'edit' ? 'อนุมัติการแก้ไข' : 'อนุมัติการยกเลิก'} ${esc(r.code)}?</h2>
+      <p class="muted">${r.type === 'edit' ? 'ระบบจะเปลี่ยนการจองตามคำขอ และคืนเงิน/เรียกเก็บส่วนต่างอัตโนมัติ' : `ระบบจะยกเลิกการจองและคืนเงิน ${money(r.check.refund)} ให้ลูกค้า`}</p>
+      <div class="field"><label>หมายเหตุถึงลูกค้า (ไม่บังคับ)</label><textarea id="note"></textarea></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn secondary" data-close>ยกเลิก</button><button class="btn" id="ok">ยืนยันอนุมัติ</button></div>`);
+    m.el.querySelector('#ok').addEventListener('click', async (e) => {
+      try { const res = await withButton(e.target, () => decide(r.id, 'approve', m.el.querySelector('#note').value)); m.close(); toast(res.message, 'success'); adminRequests(type, q); }
+      catch (err) { toast(err.message, 'error'); }
+    });
+  }));
+  $b.querySelectorAll('[data-reject]').forEach((btn) => btn.addEventListener('click', () => {
+    const r = list.find((x) => x.id === Number(btn.dataset.reject));
+    const m = modal(`
+      <h2>ปฏิเสธคำขอ ${esc(r.code)}</h2>
+      <form id="rj"><div class="field"><label>เหตุผลที่ปฏิเสธ (ลูกค้าจะเห็นข้อความนี้) *</label>
+        <textarea name="note" required placeholder="เช่น ห้องประเภทที่ขอเต็มแล้วในช่วงวันที่เลือก"></textarea></div>
+      <div class="row" style="justify-content:flex-end"><button type="button" class="btn secondary" data-close>ยกเลิก</button><button class="btn danger">ยืนยันปฏิเสธ</button></div></form>`);
+    const f = m.el.querySelector('#rj');
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { const res = await withButton(f.querySelector('.danger'), () => decide(r.id, 'reject', f.note.value)); m.close(); toast(res.message, 'success'); adminRequests(type, q); }
+      catch (err) { toast(err.message, 'error'); }
+    });
+  }));
+}
+
+// ---------- โรงแรมและห้องพัก ----------
+async function adminHotels() {
+  const $b = await adminShell('hotels', 'โรงแรมและห้องพัก', 'ราคา ความจุ จำนวนห้อง และห้องที่มีผู้เข้าพักวันนี้');
+  const hotels = await api('GET', '/admin/hotels');
+  const rooms = hotels.flatMap((h) => h.rooms);
+  const totalRooms = rooms.reduce((s, r) => s + r.total_rooms, 0), occ = rooms.reduce((s, r) => s + r.occupiedToday, 0);
+  $b.innerHTML = `
+    <div class="grid grid-3 kpis">
+      <div class="card kpi"><div class="kpi-label">โรงแรม</div><div class="kpi-num">${hotels.length}</div><div class="kpi-sub muted">${rooms.length} ประเภทห้อง</div></div>
+      <div class="card kpi"><div class="kpi-label">ห้องทั้งหมด</div><div class="kpi-num">${totalRooms}</div><div class="kpi-sub muted">ห้อง</div></div>
+      <div class="card kpi"><div class="kpi-label">อัตราเข้าพักวันนี้</div><div class="kpi-num">${totalRooms ? Math.round((occ / totalRooms) * 100) : 0}%</div><div class="kpi-sub muted">${occ} จาก ${totalRooms} ห้อง</div></div>
+    </div>
+    ${hotels.map((h) => `
+      <div class="card">
+        <div class="row between">
+          <div><h2 style="margin:0">${esc(h.name)}</h2><div class="small muted">${ic('map-pin', 13)} ${esc(h.city)} · ${'★'.repeat(h.star_class)} · คะแนน ${h.rating || '-'} (${h.reviewCount} รีวิว)</div></div>
+          <a class="btn secondary sm" href="#/hotel/${h.id}">ดูหน้าโรงแรม</a>
+        </div>
+        <div class="table-wrap" style="margin-top:var(--space-3)"><table>
+          <tr><th>ประเภทห้อง</th><th>ราคา/คืน</th><th>ความจุ</th><th>จำนวนห้อง</th><th>ไม่ว่างวันนี้</th><th>การจองที่จะมาถึง</th><th></th></tr>
+          ${h.rooms.map((r) => `<tr>
+            <td><b>${esc(r.type)}</b><div class="small muted">${esc(r.bed || '')}</div></td>
+            <td>${money(r.price)}</td>
+            <td>${r.capacity} คน/ห้อง</td>
+            <td>${r.total_rooms} ห้อง</td>
+            <td><div class="occ"><div class="occ-bar"><span style="width:${(r.occupiedToday / r.total_rooms) * 100}%"></span></div>${r.occupiedToday}/${r.total_rooms}</div></td>
+            <td>${r.upcoming} รายการ</td>
+            <td><button class="btn secondary sm" data-room="${r.id}">${ic('pencil', 14)} แก้ไข</button></td>
+          </tr>`).join('')}
+        </table></div>
+      </div>`).join('')}`;
+
+  $b.querySelectorAll('[data-room]').forEach((btn) => btn.addEventListener('click', () => {
+    const r = rooms.find((x) => x.id === Number(btn.dataset.room)), h = hotels.find((x) => x.id === r.hotel_id);
+    const m = modal(`
+      <h2>แก้ไขห้อง ${esc(r.type)}</h2>
+      <p class="muted small">${esc(h.name)}</p>
+      <form id="rm">
+        <div class="grid grid-3">
+          <div class="field"><label>ราคาต่อคืน (บาท)</label><input type="number" name="price" min="1" step="10" value="${r.price}" required></div>
+          <div class="field"><label>ความจุ (คน/ห้อง)</label><input type="number" name="capacity" min="1" max="20" value="${r.capacity}" required></div>
+          <div class="field"><label>จำนวนห้อง</label><input type="number" name="total_rooms" min="1" max="500" value="${r.total_rooms}" required></div>
+        </div>
+        <div class="hint">ลดความจุหรือจำนวนห้องให้ต่ำกว่าการจองที่มีอยู่แล้วไม่ได้ · ราคาใหม่ใช้กับการจองใหม่เท่านั้น</div>
+        <div class="row" style="justify-content:flex-end;margin-top:var(--space-4)"><button type="button" class="btn secondary" data-close>ยกเลิก</button><button class="btn">บันทึก</button></div>
+      </form>`);
+    const f = m.el.querySelector('#rm');
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { const res = await withButton(f.querySelector('button:not([type])'), () => api('PATCH', `/admin/rooms/${r.id}`, formData(f))); m.close(); toast(res.message, 'success'); adminHotels(); }
+      catch (err) { toast(err.message, 'error'); }
+    });
+  }));
+}
+
+// ---------- รายงานผู้ใช้ ----------
+async function adminReports() {
+  const $b = await adminShell('reports', 'รายงานผู้ใช้ไม่เหมาะสม', 'จากฟีเจอร์จับคู่บัดดี้');
+  const reports = await api('GET', '/admin/reports');
+  $b.innerHTML = `<div class="card">
+    ${reports.length ? `<div class="table-wrap"><table><tr><th>วันที่</th><th>ผู้รายงาน</th><th>ผู้ถูกรายงาน</th><th>เหตุผล</th><th>สถานะ</th><th></th></tr>
+      ${reports.map((r) => `<tr>
+        <td class="small">${fmtDateTime(r.created_at)}</td><td>${esc(r.reporter_name)}</td>
+        <td>${esc(r.reported_name)} <span class="small muted">@${esc(r.reported_username)}</span>${r.buddy_enabled ? '' : '<div class="small" style="color:var(--danger)">ระงับฟีเจอร์บัดดี้แล้ว</div>'}</td>
+        <td class="small">${esc(r.reason)}</td>
+        <td><span class="pill ${r.status === 'open' ? 'pending' : 'confirmed'}">${r.status === 'open' ? 'รอตรวจสอบ' : 'ดำเนินการแล้ว'}</span></td>
+        <td>${r.status === 'open' ? `<div class="row"><button class="btn danger sm" data-resolve="${r.id}" data-suspend="1">ระงับผู้ใช้</button><button class="btn secondary sm" data-resolve="${r.id}">ปิดเรื่อง</button></div>` : ''}</td>
+      </tr>`).join('')}</table></div>` : `<div class="empty slim"><div class="icon">${ic('inbox', 30)}</div>ไม่มีรายงาน</div>`}
+  </div>`;
+  $b.querySelectorAll('[data-resolve]').forEach((btn) => btn.addEventListener('click', async () => {
+    try { await withButton(btn, () => api('POST', `/admin/reports/${btn.dataset.resolve}/resolve`, { suspend: !!btn.dataset.suspend })); toast('ดำเนินการแล้ว', 'success'); adminReports(); }
     catch (err) { toast(err.message, 'error'); }
   }));
 }
@@ -1630,6 +1967,7 @@ function requireLogin() {
 async function router() {
   cleanup?.(); cleanup = null;
   document.getElementById('modal-root').innerHTML = '';
+  document.body.classList.remove('admin-mode');
   $hero.innerHTML = '';
   const raw = location.hash.slice(1) || '/';
   const [path, qs = ''] = raw.split('?');
@@ -1652,7 +1990,7 @@ async function router() {
       case 'buddy': return await buddyPage(q);
       case 'chat': return await chatPage(seg[1]);
       case 'notifications': return await notificationsPage();
-      case 'admin': return await adminPage(q);
+      case 'admin': return await adminRouter(seg, q);
       default: $app.innerHTML = `<div class="empty"><div class="icon">${ic('compass', 40)}</div>ไม่พบหน้าที่ต้องการ<br><a href="#/">กลับหน้าแรก</a></div>`;
     }
   } catch (err) {
