@@ -1,4 +1,5 @@
 // ตัวจัดการ request ของทั้งระบบ — ใช้ร่วมกันระหว่าง server.js (รันเอง) และ api/index.js (Vercel)
+import './tz.js';
 import { readFile } from 'node:fs/promises';
 import { join, extname, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

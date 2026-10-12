@@ -1,5 +1,6 @@
 // อัศวินรัตติกาล — เว็บจองโรงแรม + จับคู่บัดดี้ท่องเที่ยว
 // รัน: npm start  แล้วเปิด http://localhost:3000
+import './src/tz.js';
 import { createServer } from 'node:http';
 import handle from './src/app.js';
 
