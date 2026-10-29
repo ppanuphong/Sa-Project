@@ -804,6 +804,7 @@ async function bookingPage(id) {
   const isAdmin = state.user.role === 'admin';
   const pr = b.pending_request;
   const canEdit = ['pending', 'confirmed'].includes(b.status) && !pr;
+  const canCheckIn = todayISO() >= b.check_in && todayISO() < b.check_out;
 
   $app.innerHTML = `
     <p><a href="${isAdmin ? '#/admin' : '#/bookings'}">← ${isAdmin ? 'กลับแดชบอร์ด' : 'การจองทั้งหมดของฉัน'}</a></p>
@@ -816,7 +817,7 @@ async function bookingPage(id) {
           </div>
           ${b.status !== 'cancelled' ? timeline(b) : `<div class="alert error" style="margin-top:var(--space-3)">การจองนี้ถูกยกเลิกเมื่อ ${fmtDateTime(b.cancelled_at)}</div>`}
           ${b.status === 'pending' ? `<div class="alert warning" style="margin-top:var(--space-3)">รอชำระเงิน ${money(b.amount_due)} เพื่อยืนยันการจอง</div>` : ''}
-          ${b.status === 'confirmed' ? `<div class="alert success" style="margin-top:var(--space-3)">${ic('circle-check', 16)} การจองได้รับการยืนยันแล้ว — แสดงรหัสการจองนี้ที่เคาน์เตอร์เมื่อเช็คอิน</div>` : ''}
+          ${b.status === 'confirmed' ? `<div class="alert success" style="margin-top:var(--space-3)">${ic('circle-check', 16)} การจองได้รับการยืนยันแล้ว — กดเช็คอินได้ด้วยตัวเองในวันเข้าพัก</div>` : ''}
           ${pr ? `<div class="alert warning" style="margin-top:var(--space-3)">
             <div class="row between"><b>${ic('clock', 16)} ${pr.type === 'edit' ? 'คำขอแก้ไข' : 'คำขอยกเลิก'}รอแอดมินตรวจสอบ</b>
               ${!isAdmin ? `<button class="btn secondary sm" id="withdraw">ถอนคำขอ</button>` : `<a class="btn sm" href="#/admin/requests/${pr.type}?id=${pr.id}">ไปตรวจสอบ</a>`}</div>
@@ -863,9 +864,9 @@ async function bookingPage(id) {
           <div class="stack" style="margin-top:var(--space-4)" id="actions">
             ${b.status === 'pending' && !isAdmin ? `<a class="btn block" href="#/pay/${b.id}">${ic('credit-card')} ชำระเงิน</a>` : ''}
             ${hasVoucher(b) ? `<a class="btn ${isAdmin ? 'secondary' : ''} block" href="#/voucher/${b.id}">${ic('ticket')} เปิดใบยืนยันการจอง</a>` : ''}
-            ${b.status === 'confirmed' && isAdmin ? `<button class="btn block" data-act="checkin">${ic('concierge-bell')} เช็คอิน</button>` : ''}
-            ${b.status === 'checked_in' && isAdmin ? `<button class="btn block" data-act="checkout">${ic('luggage')} เช็คเอาท์</button>` : ''}
-            ${['confirmed', 'checked_in'].includes(b.status) && !isAdmin ? `<div class="alert info small">${ic('concierge-bell', 15)} ${b.status === 'confirmed' ? 'เช็คอินที่เคาน์เตอร์โรงแรม' : 'เช็คเอาท์ที่เคาน์เตอร์โรงแรม'} โดยเจ้าหน้าที่จะอัปเดตสถานะให้</div>` : ''}
+            ${b.status === 'confirmed' && (isAdmin || canCheckIn) ? `<button class="btn block" data-act="checkin">${ic('concierge-bell')} เช็คอิน</button>` : ''}
+            ${b.status === 'checked_in' ? `<button class="btn block" data-act="checkout">${ic('luggage')} เช็คเอาท์</button>` : ''}
+            ${b.status === 'confirmed' && !isAdmin && !canCheckIn ? `<div class="alert info small">${ic('concierge-bell', 15)} ${todayISO() < b.check_in ? `กดเช็คอินด้วยตัวเองได้ตั้งแต่วันที่ ${fmtDate(b.check_in)}` : 'เลยวันเช็คเอาท์แล้ว กรุณาติดต่อโรงแรม'}</div>` : ''}
             ${canEdit && !isAdmin ? `<button class="btn secondary block" data-act="edit">${ic('pencil')} ขอแก้ไขการจอง</button>` : ''}
             ${canEdit && !isAdmin ? `<button class="btn ghost block" style="color:var(--danger)" data-act="cancel">ขอยกเลิกการจอง</button>` : ''}
           </div>
@@ -903,13 +904,7 @@ async function bookingPage(id) {
   document.getElementById('actions').addEventListener('click', async (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
-    if (act === 'checkin' || act === 'checkout') {
-      try {
-        await withButton(e.target, () => api('POST', `/bookings/${b.id}/${act}`));
-        toast(act === 'checkin' ? 'เช็คอินสำเร็จ ยินดีต้อนรับ!' : 'เช็คเอาท์เรียบร้อย ขอบคุณที่ใช้บริการ', 'success');
-        refreshUnread(); bookingPage(b.id);
-      } catch (err) { toast(err.message, 'error'); }
-    }
+    if (act === 'checkin' || act === 'checkout') stayModal(b, act);
     if (act === 'edit') editBookingModal(b);
     if (act === 'cancel') cancelModal(b);
   });
@@ -988,6 +983,25 @@ function editBookingModal(b) {
     try {
       const r = await withButton($save, () => api('POST', `/bookings/${b.id}/requests`, { type: 'edit', ...formData(f) }));
       m.close(); toast(r.message, 'success'); bookingPage(b.id);
+    } catch (err) { toast(err.message, 'error'); }
+  });
+}
+
+function stayModal(b, act) {
+  const isIn = act === 'checkin';
+  const m = modal(`
+    <h2>${isIn ? 'ยืนยันการเช็คอิน' : 'ยืนยันการเช็คเอาท์'}</h2>
+    <p>${esc(b.hotel_name)} · ${esc(b.room_type)} × ${b.rooms_count} ห้อง</p>
+    <p class="small muted">${ic('info', 14)} ${isIn ? 'เข้าห้องพักได้ตั้งแต่ 14:00 น.' : 'เมื่อเช็คเอาท์แล้วจะไม่สามารถย้อนกลับได้ กรุณาคืนกุญแจห้องที่เคาน์เตอร์'}</p>
+    <div class="row" style="justify-content:flex-end;margin-top:var(--space-4)">
+      <button class="btn secondary" data-close>ยกเลิก</button>
+      <button class="btn" id="yes">${isIn ? 'เช็คอิน' : 'เช็คเอาท์'}</button>
+    </div>`);
+  m.el.querySelector('#yes').addEventListener('click', async (e) => {
+    try {
+      await withButton(e.target, () => api('POST', `/bookings/${b.id}/${act}`));
+      m.close(); toast(isIn ? 'เช็คอินสำเร็จ ยินดีต้อนรับ!' : 'เช็คเอาท์เรียบร้อย ขอบคุณที่ใช้บริการ', 'success');
+      refreshUnread(); bookingPage(b.id);
     } catch (err) { toast(err.message, 'error'); }
   });
 }

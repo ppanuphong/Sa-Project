@@ -403,9 +403,14 @@ route('POST', '/api/requests/:id/withdraw', ({ params, user }) => {
   return { message: 'ถอนคำขอแล้ว', booking: bookingDetail(r.booking_id, user) };
 });
 
-route('POST', '/api/bookings/:id/checkin', { admin: true }, ({ params, user }) => {
+// ลูกค้าเช็คอิน/เช็คเอาท์เองได้ (แอดมินทำแทนได้ทุกเมื่อ)
+route('POST', '/api/bookings/:id/checkin', ({ params, user }) => {
   const b = loadBooking(params.id, user);
   if (b.status !== 'confirmed') fail(400, 'เช็คอินได้เฉพาะการจองที่ยืนยันและชำระเงินครบแล้ว');
+  if (user.role !== 'admin') {
+    if (today() < b.check_in) fail(400, `เช็คอินได้ตั้งแต่วันที่ ${b.check_in} เป็นต้นไป`);
+    if (today() >= b.check_out) fail(400, 'เลยวันเช็คเอาท์แล้ว ไม่สามารถเช็คอินได้ กรุณาติดต่อโรงแรม');
+  }
   db.prepare("UPDATE bookings SET status = 'checked_in', checked_in_at = datetime('now') WHERE id = ?").run(b.id);
   db.prepare(`UPDATE booking_requests SET status = 'rejected', admin_note = 'ลูกค้าเช็คอินแล้ว', decided_by = ?, decided_at = datetime('now')
     WHERE booking_id = ? AND status = 'pending'`).run(user.id, b.id);
@@ -414,7 +419,7 @@ route('POST', '/api/bookings/:id/checkin', { admin: true }, ({ params, user }) =
   return bookingDetail(b.id, user);
 });
 
-route('POST', '/api/bookings/:id/checkout', { admin: true }, ({ params, user }) => {
+route('POST', '/api/bookings/:id/checkout', ({ params, user }) => {
   const b = loadBooking(params.id, user);
   if (b.status !== 'checked_in') fail(400, 'ต้องเช็คอินก่อนจึงจะเช็คเอาท์ได้');
   db.prepare("UPDATE bookings SET status = 'checked_out', checked_out_at = datetime('now') WHERE id = ?").run(b.id);
